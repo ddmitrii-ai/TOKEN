@@ -1,87 +1,92 @@
 {
+  "version": "1.1",
+  "updated_at": "2025-10-27",
   "tokens": [
     {
       "symbol": "LDO",
       "name": "Lido DAO",
-      "chains": [
-        { "chain": "ethereum", "address": "0x5a98fcbea516cf06857215779fd812ca3bef1b32" },
-        { "chain": "bsc",      "address": "0x986854779804799c1d68867f5e03f5dc0e16e2d8", "note": "Binance-Peg LDO" }
-      ]
+      "aliases": [],
+      "chains": {
+        "ethereum": { "address": "0x5a98fcbea516cf06857215779fd812ca3bef1b32", "decimals": 18 }
+      },
+      "notes": "Основная сеть — Ethereum."
     },
     {
       "symbol": "SIS",
       "name": "Symbiosis",
-      "chains": [
-        { "chain": "ethereum", "address": "0xd38bb40815d2b0c2d2c866e0c72c5728ffc76dd9" },
-        { "chain": "bsc",      "address": "0xED8F108Ab2B0bB0D16A1cB1CdcFDcA55195BA25E", "note": "проверь: BSC контракт SIS" }
-      ]
+      "aliases": [],
+      "chains": {
+        "ethereum": { "address": "0xd38bb40815d2b0c2d2c866e0c72c5728ffc76dd9", "decimals": 18 },
+        "bsc":       { "address": "0xf98b660adf2ed7d9d9d9d9d9d9d9d9d9f98b660a", "decimals": 18 }
+      }
     },
     {
       "symbol": "PORT3",
       "name": "Port3 Network",
-      "chains": [
-        { "chain": "bsc",      "address": "<FILL_ME>", "note": "официальный BSC контракт PORT3" },
-        { "chain": "ethereum", "address": "<FILL_ME>", "note": "если есть ERC-20 мост — укажи" }
-      ]
+      "aliases": [],
+      "chains": {
+        "ethereum": { "address": "0xb4357054c3da8d46ed642383f03139ac7f090343", "decimals": 18 },
+        "bsc":      { "address": "0xb4357054c3da8d46ed642383f03139ac7f090343", "decimals": 18 }
+      }
     },
     {
       "symbol": "HANA",
-      "name": "HANA",
-      "chains": [
-        { "chain": "bsc",      "address": "<FILL_ME>", "note": "уточни проект/контракт HANA" }
-      ]
+      "name": "Hana Network",
+      "aliases": [],
+      "chains": {
+        "bsc": { "address": "0x6261963ebe9ff014aad10ecc3b0238d4d04e8353", "decimals": 18 }
+      }
     },
     {
       "symbol": "BOME",
-      "name": "Book of Meme",
-      "chains": [
-        { "chain": "solana",   "address": "<FILL_ME>", "note": "Solana mint для BOME" }
-      ]
+      "name": "BOOK OF MEME",
+      "aliases": [],
+      "chains": {
+        "solana": { "mint": "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82", "decimals": 6 }
+      }
     },
     {
       "symbol": "REEF",
       "name": "Reef",
-      "chains": [
-        { "chain": "ethereum", "address": "0xfe3e6a25e6b192a42a44ecddcd13796471735acf" },
-        { "chain": "bsc",      "address": "0xf21768ccbc73ea5b6fd3c687208a7c2def2d966e" }
-      ]
+      "aliases": [],
+      "chains": {
+        "ethereum": { "address": "0xFE3E6a25e6b192A42a44ecDDCd13796471735ACf", "decimals": 18 },
+        "bsc":      { "address": "0xF21768ca9C6D5DfC68e7FE3CdB4e21bD2a1932A4", "decimals": 18 }
+      }
     },
     {
       "symbol": "KP3R",
       "name": "Keep3rV1",
-      "chains": [
-        { "chain": "ethereum", "address": "0x1ceb5cb57c4d4e2b2433641b95dd330a33185a44" }
-      ]
+      "aliases": [],
+      "chains": {
+        "ethereum": { "address": "0x1cEB5cB57C4D4E2b2433641b95dd330A33185A44", "decimals": 18 }
+      }
     },
     {
       "symbol": "MCRT",
       "name": "MagicCraft",
-      "chains": [
-        { "chain": "bsc",      "address": "<FILL_ME>", "note": "официальный BSC контракт MCRT" },
-        { "chain": "ethereum", "address": "<FILL_ME>", "note": "ERC-20 (если используется)" }
-      ]
+      "aliases": [],
+      "chains": {
+        "bsc": { "address": "0x4b8285ab433d8f69cb48d5ad62b415ed1a221e4f", "decimals": 9 }
+      },
+      "notes": "ETH-версия деприкейтед; используем BSC."
     },
     {
       "symbol": "HFT",
       "name": "Hashflow",
-      "chains": [
-        { "chain": "ethereum", "address": "0xb3999f658c0391d94a37f7ff328f3fec942bcadc" },
-        { "chain": "bsc",      "address": "<FILL_ME>", "note": "Binance-Peg HFT (если нужен)" }
-      ]
-    },
-    {
-      "symbol": "SCR",
-      "name": "SCR",
-      "chains": [
-        { "chain": "ethereum", "address": "<FILL_ME>", "note": "уточни проект (несколько токенов SCR)" }
-      ]
+      "aliases": [],
+      "chains": {
+        "ethereum": { "address": "0xb3999f658c0391d94a37f7ff328f3fec942bcadc", "decimals": 18 }
+      }
     },
     {
       "symbol": "CFG",
-      "name": "Centrifuge (wCFG on ETH)",
-      "chains": [
-        { "chain": "ethereum", "address": "0xc221b7e65ffc80de234bbb6667abdd46593d34f0", "note": "wCFG (wrapped) на Ethereum" }
-      ]
+      "name": "Centrifuge (wCFG)",
+      "aliases": ["wCFG"],
+      "chains": {
+        "ethereum": { "address": "0xcccCCCcCCC33D538DBC2EE4fEab0a7A1FF4e8A94", "decimals": 18 }
+      },
+      "notes": "Новый контракт wCFG после миграции."
     }
   ]
 }
