@@ -1,0 +1,23 @@
+{
+  "LDO": {
+    "ethereum": "0x5A98FcBEA516Cf06857215779Fd812CA3beF1B32"
+  },
+  "SIS": {
+    "ethereum": "0xD38Bb40815d2b0C2d2c866E0C72c5728FfC76Dd9"
+  },
+  "REEF": {
+    "ethereum": "0xFE3BeB799BCd4e28a8e913A40e042a4c4304A043",
+    "bnb": ""
+  },
+  "ARB": {
+    "ethereum": "0x912CE59144191C1204E64559FE8253a0e49E6548"
+  },
+  "FLOKI": {
+    "ethereum": "0x43f11c02439e2736800433b4594994bd43cd066d",
+    "bnb": "0xfb5b838b6cfeedc2873ab27866079ac55363d37e"
+  },
+  "C98": {
+    "ethereum": "0xae12c5930881c53715b369cec7606b70d8eb229f",
+    "bnb": "0xaec945e04baF28b135Fa7c640f624f8D90F1C3a6"
+  }
+}
