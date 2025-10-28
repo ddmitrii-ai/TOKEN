@@ -1,19 +1,23 @@
 [
   {
-    "token_id": "LDO",
-    "symbol":  "LDO",
-    "coingecko_id": "lido-dao",        // можно пусто: "", тогда цена 7д не будет фильтровать
-    "chains": [
-      {"chain": "ethereum", "address": "0x5a98fcbea516cf06857215779fd812ca3bef1b32", "enabled": true},
-      {"chain": "bnb",      "address": "0x...", "enabled": false}
-    ]
+    "symbol": "SIS",
+    "name": "Symbiosis",
+    "chain": "ethereum",
+    "address": "0xd38bb40815d2b0c2d2c866e0c72c5728ffc76dd9",
+    "coingecko_id": "symbiosis"
   },
   {
-    "token_id": "SIS",
-    "symbol":  "SIS",
-    "coingecko_id": "symbiosis-finance",
-    "chains": [
-      {"chain": "ethereum", "address": "0x5b73A93b4E5e4f1FD27D8b3F8C97D69908b5E284", "enabled": true}
-    ]
+    "symbol": "BOME",
+    "name": "BOOK OF MEME",
+    "chain": "solana",
+    "address": "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82",
+    "coingecko_id": "book-of-meme"
+  },
+  {
+    "symbol": "HANA",
+    "name": "HANA",
+    "chain": "bnb",
+    "address": "0x6261963ebe9ff014aad10ecc3b0238d4d04e8353",
+    "coingecko_id": "hana-network"
   }
 ]
