@@ -1,15 +1,19 @@
 [
-  {"chain": "ethereum", "address": "0x5a98fcbea516cf06857215779fd812ca3bef1b32", "symbol": "LDO",  "name": "Lido DAO", "mcap_usd": 2000000000},
-  {"chain": "ethereum", "address": "0xd38bb40815d2b0c2d2c866e0c72c5728ffc76dd9", "symbol": "SIS",  "name": "Symbiosis"},
-  {"chain": "bnb",      "address": "0xd38bb478bed6f1ff7ffdb053ea8a2307f2dbfff3", "symbol": "SIS",  "name": "Symbiosis (BSC)"},
-  {"chain": "ethereum", "address": "0xb435c38cc42ad724975ff1aa83b33e8c5716f5b1", "symbol": "PORT3","name": "Port3"},
-  {"chain": "bnb",      "address": "0xb435c38cc42ad724975ff1aa83b33e8c5716f5b1", "symbol": "PORT3","name": "Port3 (BSC)"},
-  {"chain": "bnb",      "address": "0x6261963e85ee3a128b2405ee5a779647cfd2e835", "symbol": "HANA", "name": "HANA"},
-  {"chain": "solana",   "address": "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82", "symbol": "BOME","name": "BOOK OF MEME"},
-  {"chain": "ethereum", "address": "0xfe3e6a25e6b192a42a44ecddcd13796471735acf", "symbol": "REEF", "name": "Reef"},
-  {"chain": "bnb",      "address": "0xf21768ccbc73ea5b6fd3c687208a7c2def2d966e", "symbol": "REEF", "name": "Reef (BSC)"},
-  {"chain": "ethereum", "address": "0x1ceb5faccbc5e2eae93e9bcb4e9aaea86a3e3abc", "symbol": "KP3R", "name": "Keep3rV1"},
-  {"chain": "bnb",      "address": "0x4b8285ab433d8f69cb48d5ad62b415ed1a221e4f", "symbol": "MCRT","name": "MagicCraft (BSC)"},
-  {"chain": "ethereum", "address": "0xb3999f658c0391d94a37f7ff328f3fec942bcbdc", "symbol": "HFT",  "name": "Hashflow"},
-  {"chain": "ethereum", "address": "0xcccccccccc33d538dbc2ee4feab0a7a1ff4e8a94", "symbol": "CFG",  "name": "Centrifuge"}
+  {
+    "token_id": "LDO",
+    "symbol":  "LDO",
+    "coingecko_id": "lido-dao",        // можно пусто: "", тогда цена 7д не будет фильтровать
+    "chains": [
+      {"chain": "ethereum", "address": "0x5a98fcbea516cf06857215779fd812ca3bef1b32", "enabled": true},
+      {"chain": "bnb",      "address": "0x...", "enabled": false}
+    ]
+  },
+  {
+    "token_id": "SIS",
+    "symbol":  "SIS",
+    "coingecko_id": "symbiosis-finance",
+    "chains": [
+      {"chain": "ethereum", "address": "0x5b73A93b4E5e4f1FD27D8b3F8C97D69908b5E284", "enabled": true}
+    ]
+  }
 ]
