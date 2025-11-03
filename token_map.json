@@ -4,20 +4,23 @@
     "name": "Symbiosis",
     "chain": "ethereum",
     "address": "0xd38bb40815d2b0c2d2c866e0c72c5728ffc76dd9",
-    "coingecko_id": "symbiosis"
+    "coingecko_id": "symbiosis",
+    "active": true
   },
   {
     "symbol": "BOME",
     "name": "BOOK OF MEME",
     "chain": "solana",
     "address": "ukHH6c7mMyiWCf1b9pnWe25TSpkDDt3H5pQZgZ74J82",
-    "coingecko_id": "book-of-meme"
+    "coingecko_id": "book-of-meme",
+    "active": true
   },
   {
     "symbol": "HANA",
     "name": "HANA",
     "chain": "bnb",
     "address": "0x6261963ebe9ff014aad10ecc3b0238d4d04e8353",
-    "coingecko_id": "hana-network"
+    "coingecko_id": "hana-network",
+    "active": true
   }
 ]
