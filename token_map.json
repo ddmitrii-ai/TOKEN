@@ -24,6 +24,14 @@
     "active": true
   },
   {
+    "symbol": "LDO",
+    "name": "lido-dao",
+    "chain": "ethereum",
+    "address": "0x5a98fcbea516cf06857215779fd812ca3bef1b32",
+    "coingecko_id": "lido-dao",
+    "active": true
+  },
+  {
     "symbol": "HANA",
     "name": "HANA",
     "chain": "bnb",
