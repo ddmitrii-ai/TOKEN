@@ -46,5 +46,13 @@
     "address": "0x20d6015660b3fe52e6690a889b5c51f69902ce0e",
     "coingecko_id": "giggle-fund",
     "active": true
+  },
+  {
+    "symbol": "AIA",
+    "name": "DeAgentAI",
+    "chain": "bnb",
+    "address": "0x48a18a4782b65a0fbed4dca608bb28038b7be339",
+    "coingecko_id": "deagentai",
+    "active": true
   }
 ]
