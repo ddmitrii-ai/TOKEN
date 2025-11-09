@@ -25,7 +25,7 @@
   },
   {
     "symbol": "LDO",
-    "name": "lido-dao",
+    "name": "Lido DAO",
     "chain": "ethereum",
     "address": "0x5a98fcbea516cf06857215779fd812ca3bef1b32",
     "coingecko_id": "lido-dao",
@@ -48,11 +48,19 @@
     "active": true
   },
   {
-    "symbol": "AIA",
-    "name": "DeAgentAI",
-    "chain": "bnb",
+    "symbol": "DEAI",
+    "name": "DeAgent.AI",
+    "chain": "ethereum",
     "address": "0x48a18a4782b65a0fbed4dca608bb28038b7be339",
     "coingecko_id": "deagentai",
+    "active": true
+  },
+  {
+    "symbol": "SOON",
+    "name": "Soon 2",
+    "chain": "ethereum",
+    "address": "0xb9E1Fd5A02D3A33b25a14d661414E6ED6954a721",
+    "coingecko_id": "soon-2",
     "active": true
   }
 ]
