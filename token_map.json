@@ -38,13 +38,13 @@
     "address": "0x6261963ebe9ff014aad10ecc3b0238d4d04e8353",
     "coingecko_id": "hana-network",
     "active": true
+  },
+  {
+    "symbol": "GIGGLE",
+    "name": "GIGGLE",
+    "chain": "bnb",
+    "address": "0x20d6015660b3fe52e6690a889b5c51f69902ce0e",
+    "coingecko_id": "giggle-fund",
+    "active": true
   }
-{
-  "symbol": "GIGGLE",
-  "name": "GIGGLE",
-  "chain": "bnb",
-  "address": "0x20d6015660b3fe52e6690a889b5c51f69902ce0e",
-  "coingecko_id": "giggle-fund",
-  "active": true
-}
 ]
