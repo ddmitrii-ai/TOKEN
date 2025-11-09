@@ -50,7 +50,7 @@
   {
     "symbol": "DEAI",
     "name": "DeAgent.AI",
-    "chain": "ethereum",
+    "chain": "bnb",
     "address": "0x48a18a4782b65a0fbed4dca608bb28038b7be339",
     "coingecko_id": "deagentai",
     "active": true
@@ -58,7 +58,7 @@
   {
     "symbol": "SOON",
     "name": "Soon 2",
-    "chain": "ethereum",
+    "chain": "bnb",
     "address": "0xb9E1Fd5A02D3A33b25a14d661414E6ED6954a721",
     "coingecko_id": "soon-2",
     "active": true
