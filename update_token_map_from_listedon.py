@@ -21,7 +21,7 @@ LISTEDON_SOURCES = [
 
 MAX_PAGES_PER_EXCHANGE = int(os.getenv("MAX_PAGES_PER_EXCHANGE", "10"))
 
-# Пока вообще НЕ режем по возрасту, только парсим и логируем
+# Пока не режем по возрасту – сначала просто научимся парсить
 USE_DATE_WINDOW = False
 MIN_AGE_DAYS = int(os.getenv("MIN_AGE_DAYS", "7"))
 MAX_AGE_DAYS = int(os.getenv("MAX_AGE_DAYS", "90"))
@@ -70,92 +70,37 @@ def log(msg: str) -> None:
 
 MONTH_PATTERN = r"(January|February|March|April|May|June|July|August|September|October|November|December)"
 
+# формат типа "November 10, 2025"
+DATE_REGEX = re.compile(rf"^{MONTH_PATTERN} \d{{1,2}}, \d{{4}}$")
 
-def extract_date_part(raw: str) -> Optional[str]:
-    """
-    Из текста ячейки (например 'October 23, 2025 15:14' или с переносами)
-    выдёргиваем только 'October 23, 2025'.
-    """
-    if not raw:
-        return None
-    s = " ".join(str(raw).split())
-    m = re.search(r"[A-Za-z]+ \d{1,2}, \d{4}", s)
-    if m:
-        return m.group(0)
-    return s
+# Пары вида AAA/BBBB (AAA – тикер, BBBB – quote, обычно USDT)
+PAIR_REGEX = re.compile(r"\b([A-Z0-9\.\-]{2,15})/([A-Z0-9]{2,10})\b")
 
 
 def parse_listedon_date(raw: str) -> Optional[date]:
+    raw = (raw or "").strip()
     if not raw:
         return None
-    date_part = extract_date_part(raw)
-    if not date_part:
-        return None
     try:
-        dt = datetime.strptime(date_part, "%B %d, %Y")
+        dt = datetime.strptime(raw, "%B %d, %Y")
         return dt.date()
     except ValueError:
         return None
 
 
-PAIR_REGEX = re.compile(r"\b([A-Z0-9\.\-]{2,15})/([A-Z0-9]{2,10})\b")
-
-
-def find_pair_in_row(tr) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Ищем строку вида 'AAA/BBBB' в любом <td> строки.
-    Возвращаем (pair_text, base_symbol) или (None, None).
-    """
-    tds = tr.find_all("td")
-    if not tds:
-        return None, None
-
-    for td in tds:
-        txt = td.get_text(" ", strip=True)
-        m = PAIR_REGEX.search(txt)
-        if m:
-            pair = m.group(0)
-            base = m.group(1).upper()
-            return pair, base
-    return None, None
-
-
-def find_date_in_row(tr) -> Tuple[Optional[str], Optional[date]]:
-    """
-    Берём текст последнего <td> и пытаемся вытащить дату.
-    Если не получилось — пробуем найти дату в любом td с месяцем.
-    """
-    tds = tr.find_all("td")
-    if not tds:
-        return None, None
-
-    # сначала пробуем последний столбец
-    last_txt = tds[-1].get_text(" ", strip=True)
-    d = parse_listedon_date(last_txt)
-    if d:
-        return last_txt, d
-
-    # fallback: ищем td с месяцем
-    for td in reversed(tds):
-        txt = td.get_text(" ", strip=True)
-        if re.search(MONTH_PATTERN, txt):
-            d2 = parse_listedon_date(txt)
-            if d2:
-                return txt, d2
-
-    return last_txt or None, None
-
-
 def fetch_listedon_for_exchange(slug: str, human_name: str) -> List[ListedonItem]:
     """
-    Парсим listedon для биржи.
-    НЕ фильтруем по возрасту, просто собираем всё и логируем первые несколько строк.
+    Новый парсер:
+      - идём по tr сверху вниз
+      - если строка = "November 10, 2025" → current_date
+      - если в строке видим "BNBHOLDER/USDT" → берём тикер BNBHOLDER, дату = current_date
     """
     items: List[ListedonItem] = []
     today = date.today()
     log(f"[{human_name}] Today (server local date) = {today}")
 
     debug_rows_logged = 0
+    current_date: Optional[date] = None
 
     for page in range(1, MAX_PAGES_PER_EXCHANGE + 1):
         url = f"https://listedon.org/en/exchange/{slug}/search?page={page}&sort=date&order=1"
@@ -180,37 +125,49 @@ def fetch_listedon_for_exchange(slug: str, human_name: str) -> List[ListedonItem
         log(f"[{human_name}]  Rows on page {page}: {len(rows)}")
 
         for idx, tr in enumerate(rows, start=1):
-            # пробуем найти пару в строке
-            pair_text, base_symbol = find_pair_in_row(tr)
+            tds = tr.find_all("td")
+            if not tds:
+                continue
 
-            # пробуем спарсить дату
-            raw_date_text, listed_date = find_date_in_row(tr)
+            texts = [td.get_text(" ", strip=True) for td in tds]
+            row_text = " | ".join(texts)
 
+            # логируем первые 30 строк, чтобы видеть реальную структуру
+            if debug_rows_logged < 30:
+                log(f"[{human_name}]  row#{idx} text: '{row_text}'")
+                debug_rows_logged += 1
+
+            # 1) если строка - дата (например, "November 10, 2025")
+            if len(texts) == 1 and DATE_REGEX.match(texts[0]):
+                parsed = parse_listedon_date(texts[0])
+                if parsed:
+                    current_date = parsed
+                    log(f"[{human_name}]    -> current_date set to {current_date}")
+                continue
+
+            # 2) ищем пару AAA/BBBB в строке (она может быть там же, где тикер/время/тип)
+            m = PAIR_REGEX.search(row_text)
+            if not m:
+                continue
+
+            pair_text = m.group(0)
+            base_symbol = m.group(1).upper()
+
+            # ссылка на биржу (если есть)
+            link_tag = tr.find("a")
+            market_url = link_tag["href"] if link_tag and link_tag.has_attr("href") else ""
+
+            # возраст (если дата уже увидена раньше)
+            listed_date = current_date
             age_days: Optional[int] = None
             if listed_date:
                 age_days = (today - listed_date).days
 
-            if debug_rows_logged < 20:
-                # выводим краткий debug по первой 20 строчек
-                row_text = tr.get_text(" | ", strip=True)
-                log(
-                    f"[{human_name}]  row#{idx} debug: "
-                    f"row_text='{row_text[:200]}', "
-                    f"pair='{pair_text}', "
-                    f"base_symbol='{base_symbol}', "
-                    f"raw_date='{raw_date_text}', "
-                    f"parsed_date={listed_date}, age_days={age_days}"
-                )
-                debug_rows_logged += 1
+            log(
+                f"[{human_name}]    FOUND pair '{pair_text}' "
+                f"symbol='{base_symbol}' date={listed_date} age_days={age_days}"
+            )
 
-            # если не нашли пару — пропускаем
-            if not pair_text or not base_symbol:
-                continue
-
-            link_tag = tr.find("a")
-            market_url = link_tag["href"] if link_tag and link_tag.has_attr("href") else ""
-
-            # Здесь пока НЕ режем по возрасту (USE_DATE_WINDOW=False)
             items.append(
                 ListedonItem(
                     symbol=base_symbol,
@@ -286,7 +243,7 @@ def save_token_map(path: str, tokens: List[Dict[str, Any]]) -> None:
 
 
 # ----------------------------
-# Main logic
+# Main logic: Coingecko + фильтры
 # ----------------------------
 
 def build_existing_index(existing: List[Dict[str, Any]]) -> Set[Tuple[str, str]]:
@@ -336,6 +293,7 @@ def token_entries_from_coin(
 ) -> List[Dict[str, Any]]:
     entries: List[Dict[str, Any]] = []
 
+    # 1) Маккап
     market_data = coin.get("market_data") or {}
     mcap = (market_data.get("market_cap") or {}).get("usd")
     if not isinstance(mcap, (int, float)):
@@ -344,6 +302,7 @@ def token_entries_from_coin(
     if not (MIN_MCAP_USD <= mcap <= MAX_MCAP_USD):
         return []
 
+    # 2) На каких биржах торгуется на Coingecko
     tickers = coin.get("tickers") or []
     exchanges_seen: Set[str] = set()
     for t in tickers:
@@ -371,6 +330,7 @@ def token_entries_from_coin(
     if len(exchanges_seen & TARGET_EXCHANGES) < MIN_EXCHANGES_REQUIRED:
         return []
 
+    # 3) Берём только сети ETH / BNB / SOL
     platforms = coin.get("platforms") or {}
     symbol = coin.get("symbol", "").upper()
     name = coin.get("name", "")
@@ -421,7 +381,7 @@ def main() -> None:
     log(f"Grouped into {len(grouped)} unique symbols.")
 
     candidates_symbols = list(grouped.keys())
-    log(f"Symbols to try on Coingecko (before any listedon-exchange filter): {len(candidates_symbols)}")
+    log(f"Symbols to try on Coingecko (before CG filters): {len(candidates_symbols)}")
 
     existing_tokens = load_token_map(TOKEN_MAP_PATH)
     existing_idx = build_existing_index(existing_tokens)
