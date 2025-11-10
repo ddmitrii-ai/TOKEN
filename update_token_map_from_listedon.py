@@ -1,9 +1,10 @@
 import json
 import os
 import re
-from dataclasses import dataclass
-from datetime import datetime, date
-from typing import Any, Dict, List, Optional, Set, Tuple
+from dataclasses import dataclass, field
+from datetime import datetime, date, timedelta
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Tuple
 
 import requests
 from bs4 import BeautifulSoup
@@ -12,451 +13,515 @@ from bs4 import BeautifulSoup
 # Конфиг
 # ----------------------------
 
-TOKEN_MAP_PATH = os.getenv("TOKEN_MAP_PATH", "token_map.json")
+BASE_URL = "https://listedon.org"
 
-# какой файл правим на GitHub:
-# https://raw.githubusercontent.com/ddmitrii-ai/TOKEN/refs/heads/main/token_map.json
+# Биржи из ListedOn (slug после /en/exchange/...), которые считаем "валидными"
+TARGET_EXCHANGES: Set[str] = {
+    "mxc",
+    "bybit_spot",
+    "gate",
+    "binance",
+    "kucoin",
+    "huobi",
+    "bingx",
+}
 
-LISTEDON_SOURCES = [
-    ("mxc", "MEXC"),
-    ("gate", "Gate.io"),
+# Биржи, с которых берём кандидатов (страницы /en/exchange/{slug})
+# делаем то же самое множество, можно сократить при желании
+SOURCE_EXCHANGES: List[str] = [
+    "mxc",
+    "bybit_spot",
+    "gate",
+    "binance",
+    "kucoin",
+    "huobi",
+    "bingx",
 ]
 
-MAX_PAGES_PER_EXCHANGE = int(os.getenv("MAX_PAGES_PER_EXCHANGE", "10"))
+# Окно по возрасту листинга НА БИРЖЕ-ИСТОЧНИКЕ
+# Например: [7, 90] = от 1 недели до 3 месяцев
+MIN_AGE_DAYS = 7
+MAX_AGE_DAYS = 90
 
-# Окно по возрасту пока НЕ используем (главное – научиться парсить)
-USE_DATE_WINDOW = False
-MIN_AGE_DAYS = int(os.getenv("MIN_AGE_DAYS", "7"))
-MAX_AGE_DAYS = int(os.getenv("MAX_AGE_DAYS", "90"))
+# CoinGecko фильтры
+MIN_MCAP_USD = 3_000_000
+MAX_MCAP_USD = 1_000_000_000
+MIN_VOLUME_USD = 0  # если захочешь, поставишь, например, 200_000
 
-# Фильтры по капитализации
-MIN_MCAP_USD = float(os.getenv("MIN_MCAP_USD", "3000000"))       # 3M
-MAX_MCAP_USD = float(os.getenv("MAX_MCAP_USD", "1000000000"))    # 1B
+# Какие сети нас интересуют
+ALLOWED_CHAINS = {"ethereum", "bnb", "solana"}
 
-# Биржи, на которых токен должен быть листингован (по данным Coingecko)
-TARGET_EXCHANGES = {
-    "BINANCE",
-    "MEXC",
-    "GATE.IO",
-    "KUCOIN",
-    "BYBIT",
-    "HTX",
-    "BINGX",
-}
-MIN_EXCHANGES_REQUIRED = int(os.getenv("MIN_EXCHANGES_REQUIRED", "2"))
-
-COINGECKO_API_BASE = "https://api.coingecko.com/api/v3"
-
-SESSION = requests.Session()
-SESSION.headers.update(
-    {"User-Agent": "MaTT-TokenMap-Updater/1.0 (+https://example.com)"}
-)
-
-
-@dataclass
-class ListedonItem:
-    symbol: str
-    pair: str
-    exchange_slug: str
-    exchange_name: str
-    listed_date: Optional[date]
-    market_url: str
-
-
-def log(msg: str) -> None:
-    print(msg, flush=True)
-
-
-# ----------------------------
-# Coingecko helpers
-# ----------------------------
-
-def cg_request(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
-    url = f"{COINGECKO_API_BASE}{path}"
-    resp = SESSION.get(url, params=params, timeout=20)
-    if resp.status_code != 200:
-        raise RuntimeError(f"Coingecko API error {resp.status_code}: {resp.text[:200]}")
-    return resp.json()
-
-
-def search_coins_by_symbol(symbol: str) -> List[Dict[str, Any]]:
-    data = cg_request("/search", {"query": symbol})
-    results = data.get("coins", [])
-    out: List[Dict[str, Any]] = []
-    for c in results:
-        if str(c.get("symbol", "")).upper() == symbol.upper():
-            out.append(c)
-    return out
-
-
+# Маппинг названий платформ из CoinGecko в наши chain-строки
 PLATFORM_TO_CHAIN = {
     "ethereum": "ethereum",
+    "eth": "ethereum",
+
     "binance-smart-chain": "bnb",
-    "bsc": "bnb",
     "bnb-smart-chain": "bnb",
+    "bsc": "bnb",
+
     "solana": "solana",
 }
 
+TOKEN_MAP_PATH = Path("token_map.json")
 
-def normalize_exchange_name(name: str) -> str:
-    return name.strip().upper().replace(".COM", "").replace(" ", "")
-
-
-def load_token_map(path: str) -> List[Dict[str, Any]]:
-    if not os.path.exists(path):
-        log(f"No existing {path}, starting from empty list.")
-        return []
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, list):
-        raise RuntimeError("token_map.json must be a list")
-    return data
-
-
-def save_token_map(path: str, tokens: List[Dict[str, Any]]) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(tokens, f, ensure_ascii=False, indent=2)
-    log(f"Saved {len(tokens)} tokens to {path}")
-
-
-def build_existing_index(existing: List[Dict[str, Any]]) -> Set[Tuple[str, str]]:
-    idx: Set[Tuple[str, str]] = set()
-    for t in existing:
-        chain = str(t.get("chain", "")).lower()
-        addr = str(t.get("address", "")).lower()
-        if chain and addr:
-            idx.add((chain, addr))
-    return idx
+COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY")  # опционально
 
 
 # ----------------------------
-# Парсинг ListedOn
+# Модели
 # ----------------------------
 
-def parse_date_from_td(td) -> Optional[date]:
+@dataclass
+class ExchangeListing:
+    exchange_slug: str
+    listing_date: date
+
+
+@dataclass
+class TickerCandidate:
+    symbol: str
+    ticker_url: str
+    discovered_on: Set[str] = field(default_factory=set)  # с каких бирж-источников увидели
+    listings: List[ExchangeListing] = field(default_factory=list)
+
+    def target_exchanges(self) -> Set[str]:
+        return {l.exchange_slug for l in self.listings if l.exchange_slug in TARGET_EXCHANGES}
+
+    def first_listing_date(self) -> Optional[date]:
+        if not self.listings:
+            return None
+        return min(l.listing_date for l in self.listings)
+
+
+# ----------------------------
+# Утилиты
+# ----------------------------
+
+def http_get(url: str, **kwargs) -> Optional[requests.Response]:
+    headers = kwargs.pop("headers", {})
+    headers.setdefault("User-Agent", "Mozilla/5.0 (compatible; MaTT-bot/1.0)")
+    try:
+        resp = requests.get(url, headers=headers, timeout=15, **kwargs)
+        if resp.status_code != 200:
+            print(f"[HTTP] {url} -> {resp.status_code}")
+            return None
+        return resp
+    except Exception as e:
+        print(f"[HTTP] error GET {url}: {e}")
+        return None
+
+
+def parse_listedon_date_td(td) -> Optional[date]:
     """
     td:
       <td class="date">
-          " November 10"
-          <span class="year">, 2025</span><br>
-          <span class="time">11:59</span>
+        " November 10"
+        <span class="year">, 2025</span>
+        <br/>
+        <span class="time">11:59</span>
       </td>
+    Хотим получить date(2025, 11, 10)
     """
     if td is None:
         return None
 
-    # первый текстовый узел содержит " November 10"
-    month_day_raw = ""
-    if td.contents:
-        first = td.contents[0]
-        month_day_raw = getattr(first, "strip", lambda: str(first))().strip().strip('"').strip()
+    # Удаляем время
+    for span in td.find_all("span", class_="time"):
+        span.decompose()
 
-    year_span = td.find("span", class_="year")
-    year_raw = ""
-    if year_span:
-        year_raw = year_span.get_text(strip=True).lstrip(",").strip()
+    text = td.get_text(" ", strip=True)
+    # Приводим к нормальному виду: "November 10, 2025"
+    text = " ".join(text.split())
+    text = text.replace(" ,", ",")
 
-    if not month_day_raw or not year_raw:
-        return None
+    # Иногда может быть "November 10 2025" без запятой, пробуем оба формата
+    for fmt in ("%B %d, %Y", "%B %d %Y"):
+        try:
+            dt = datetime.strptime(text, fmt)
+            return dt.date()
+        except ValueError:
+            continue
 
-    date_str = f"{month_day_raw}, {year_raw}"      # "November 10, 2025"
-    try:
-        dt = datetime.strptime(date_str, "%B %d, %Y")
-        return dt.date()
-    except ValueError:
-        return None
+    print(f"[WARN] could not parse date from '{text}'")
+    return None
 
 
-def fetch_listedon_for_exchange(slug: str, human_name: str) -> List[ListedonItem]:
+# ----------------------------
+# Парсинг exchange-страниц
+# ----------------------------
+
+def fetch_exchange_listings(exchange_slug: str,
+                            max_pages: int = 10) -> List[Tuple[str, str, date]]:
     """
-    Структура строки:
-    <tr class="item">
-        <td class="date">...</td>
-        <td> TICKER (ссылкой) </td>
-        <td class="type"> Listing </td>
-        <td><div class="pairs">PAIR/USDT</div></td>
-    </tr>
+    Возвращает список (symbol, ticker_url, listing_date_on_this_exchange)
+    только для строк, которые попадают в окно по возрасту [MIN_AGE_DAYS, MAX_AGE_DAYS].
     """
-    items: List[ListedonItem] = []
     today = date.today()
-    log(f"[{human_name}] Today (server local date) = {today}")
+    print(f"[{exchange_slug.upper()}] Today (server local date) = {today}")
 
-    debug_logged = 0
+    results: List[Tuple[str, str, date]] = []
 
-    for page in range(1, MAX_PAGES_PER_EXCHANGE + 1):
-        url = f"https://listedon.org/en/exchange/{slug}/search?page={page}&sort=date&order=1"
-        log(f"[{human_name}] Fetching listedon page: {url}")
-        resp = SESSION.get(url, timeout=20)
-        if resp.status_code != 200:
-            log(f"[{human_name}]  ! HTTP {resp.status_code}, stop paging")
+    for page in range(1, max_pages + 1):
+        url = f"{BASE_URL}/en/exchange/{exchange_slug}/search?page={page}&sort=date&order=1"
+        print(f"[{exchange_slug.upper()}] Fetching listedon page: {url}")
+        resp = http_get(url)
+        if not resp:
             break
 
         soup = BeautifulSoup(resp.text, "html.parser")
-        table = soup.find("table", id="itemList") or soup.find("table", class_="table-smart-items")
+        table = soup.find("table", class_="table-smart-items")
         if not table:
-            log(f"[{human_name}]  ! No table found, stop")
+            print(f"[{exchange_slug.upper()}]  No table-smart-items on page {page}")
             break
 
-        tbody = table.find("tbody")
-        rows = tbody.find_all("tr", class_="item") if tbody else table.find_all("tr", class_="item")
+        rows = table.select("tbody tr.item")
+        print(f"[{exchange_slug.upper()}]  Rows on page {page}: {len(rows)}")
+
         if not rows:
-            # fallback: любые tr
-            rows = tbody.find_all("tr") if tbody else table.find_all("tr")
-        if not rows:
-            log(f"[{human_name}]  ! No rows found, stop")
             break
 
-        log(f"[{human_name}]  Rows on page {page}: {len(rows)}")
-
-        for idx, tr in enumerate(rows, start=1):
-            tds = tr.find_all("td")
-            if len(tds) < 3:
+        for tr in rows:
+            date_td = tr.find("td", class_="date")
+            ticker_link = tr.find("a", href=re.compile(r"/en/ticker/"))
+            if not date_td or not ticker_link:
                 continue
 
-            date_td = tds[0]
-            ticker_td = tds[1]
-            pairs_td = tds[-1]
-
-            listed_date = parse_date_from_td(date_td)
-
-            # тикер (короткое имя)
-            ticker_a = ticker_td.find("a")
-            symbol = (ticker_a.get_text(strip=True) if ticker_a else ticker_td.get_text(strip=True)).upper()
-
-            # пара
-            pairs_text = pairs_td.get_text(" ", strip=True)
-            # иногда там несколько пар; берём первую AAA/BBBB
-            pair_match = re.search(r"[A-Z0-9\.\-]{2,15}/[A-Z0-9]{2,10}", pairs_text)
-            if not pair_match:
-                pair = ""
-            else:
-                pair = pair_match.group(0)
-
-            # ссылка на биржу
-            link_tag = pairs_td.find("a") or ticker_a
-            market_url = link_tag["href"] if link_tag and link_tag.has_attr("href") else ""
-
-            if debug_logged < 20:
-                log(
-                    f"[{human_name}]  row#{idx}: date_td='{date_td.get_text(' ', strip=True)}', "
-                    f"parsed_date={listed_date}, symbol='{symbol}', pairs_text='{pairs_text}', pair='{pair}'"
-                )
-                debug_logged += 1
-
-            if not symbol or not pair:
+            listing_date = parse_listedon_date_td(date_td)
+            if not listing_date:
                 continue
 
-            # возраст пока не используем для фильтрации
-            age_days: Optional[int] = None
-            if listed_date:
-                age_days = (today - listed_date).days
-            log(
-                f"[{human_name}]    -> FOUND symbol={symbol} pair={pair} "
-                f"date={listed_date} age_days={age_days} url={market_url}"
-            )
+            age = (today - listing_date).days
+            if age < MIN_AGE_DAYS or age > MAX_AGE_DAYS:
+                continue
 
-            items.append(
-                ListedonItem(
-                    symbol=symbol,
-                    pair=pair,
-                    exchange_slug=slug,
-                    exchange_name=human_name,
-                    listed_date=listed_date,
-                    market_url=market_url,
-                )
-            )
+            symbol = (ticker_link.text or "").strip().upper()
+            href = ticker_link.get("href", "")
+            ticker_url = requests.compat.urljoin(BASE_URL, href)
 
-    log(f"[{human_name}]  Total rows collected (no age filter): {len(items)}")
-    return items
+            results.append((symbol, ticker_url, listing_date))
 
-
-def fetch_listedon_items() -> List[ListedonItem]:
-    all_items: List[ListedonItem] = []
-    for slug, human in LISTEDON_SOURCES:
-        all_items.extend(fetch_listedon_for_exchange(slug, human))
-    return all_items
+    print(f"[{exchange_slug.upper()}]  Total rows collected (within age window): {len(results)}")
+    return results
 
 
 # ----------------------------
-# Группировка ListedOn символов
+# Парсинг ticker-страницы (/en/ticker/XXX)
 # ----------------------------
 
-def group_listedon_items(items: List[ListedonItem]) -> Dict[str, Dict[str, Any]]:
-    grouped: Dict[str, Dict[str, Any]] = {}
-    for it in items:
-        sym = it.symbol.upper()
-        g = grouped.setdefault(
-            sym,
-            {
-                "symbol": sym,
-                "exchanges": set(),
-                "first_listed": it.listed_date,
-            },
-        )
-        g["exchanges"].add(it.exchange_name)
-        if it.listed_date and (g["first_listed"] is None or it.listed_date < g["first_listed"]):
-            g["first_listed"] = it.listed_date
-    return grouped
+def fetch_ticker_details(symbol: str, ticker_url: str) -> TickerCandidate:
+    """
+    Для тикера собираем все листинги на биржах (exchange_slug + date).
+    """
+    resp = http_get(ticker_url)
+    cand = TickerCandidate(symbol=symbol, ticker_url=ticker_url)
+
+    if not resp:
+        print(f"[TICKER] Failed to fetch {ticker_url}")
+        return cand
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    table = soup.find("table", class_="table-smart-items")
+    if not table:
+        print(f"[TICKER] No table-smart-items for {ticker_url}")
+        return cand
+
+    rows = table.select("tbody tr.item")
+    for tr in rows:
+        date_td = tr.find("td", class_="date")
+        exch_td = tr.find("td", class_=re.compile(r"\bexchanges?\b"))
+
+        listing_date = parse_listedon_date_td(date_td)
+        if not listing_date or not exch_td:
+            continue
+
+        exch_link = exch_td.find("a", href=re.compile(r"/en/exchange/"))
+        if not exch_link:
+            continue
+
+        href = exch_link.get("href", "")
+        m = re.search(r"/en/exchange/([^/?#]+)", href)
+        if not m:
+            continue
+
+        exch_slug = m.group(1).lower()
+        cand.listings.append(ExchangeListing(exchange_slug=exch_slug,
+                                             listing_date=listing_date))
+
+    return cand
 
 
-def coingecko_coin_details(coin_id: str) -> Dict[str, Any]:
+# ----------------------------
+# CoinGecko
+# ----------------------------
+
+def coingecko_headers() -> Dict[str, str]:
+    headers = {"Accept": "application/json"}
+    if COINGECKO_API_KEY:
+        headers["x-cg-pro-api-key"] = COINGECKO_API_KEY
+    return headers
+
+
+def coingecko_search_symbol(symbol: str) -> List[Dict]:
+    url = "https://api.coingecko.com/api/v3/search"
+    resp = http_get(url, params={"query": symbol}, headers=coingecko_headers())
+    if not resp:
+        return []
+    try:
+        data = resp.json()
+    except Exception as e:
+        print(f"[CG] failed parse search response for {symbol}: {e}")
+        return []
+    return data.get("coins", [])
+
+
+def coingecko_get_coin(coin_id: str) -> Optional[Dict]:
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
     params = {
         "localization": "false",
-        "tickers": "true",
+        "tickers": "false",
         "market_data": "true",
         "community_data": "false",
         "developer_data": "false",
         "sparkline": "false",
     }
-    return cg_request(f"/coins/{coin_id}", params=params)
+    resp = http_get(url, params=params, headers=coingecko_headers())
+    if not resp:
+        return None
+    try:
+        return resp.json()
+    except Exception as e:
+        print(f"[CG] failed parse coin {coin_id}: {e}")
+        return None
 
 
-def token_entries_from_coin(
-    coin: Dict[str, Any],
-    listed_meta: Dict[str, Any],
-    existing_idx: Set[Tuple[str, str]],
-) -> List[Dict[str, Any]]:
-    entries: List[Dict[str, Any]] = []
+def choose_chain_and_address(platforms: Dict[str, str]) -> Optional[Tuple[str, str]]:
+    """
+    platforms: {"ethereum": "0x...", "solana": "...", ...}
+    Возвращаем (chain, address) или None.
+    """
+    if not platforms:
+        return None
 
-    # 1) фильтр по капитализации
-    market_data = coin.get("market_data") or {}
-    mcap = (market_data.get("market_cap") or {}).get("usd")
-    if not isinstance(mcap, (int, float)):
-        return []
-    mcap = float(mcap)
-    if not (MIN_MCAP_USD <= mcap <= MAX_MCAP_USD):
-        return []
+    priority = ["bnb", "ethereum", "solana"]
 
-    # 2) на каких биржах торгуется (по данным Coingecko)
-    tickers = coin.get("tickers") or []
-    exchanges_seen: Set[str] = set()
-    for t in tickers:
-        market = t.get("market") or {}
-        name = str(market.get("name") or "")
-        norm = normalize_exchange_name(name)
-        if not norm:
-            continue
-
-        if "BINANCE" in norm:
-            exchanges_seen.add("BINANCE")
-        elif "MEXC" in norm:
-            exchanges_seen.add("MEXC")
-        elif "GATE" in norm:
-            exchanges_seen.add("GATE.IO")
-        elif "KUCOIN" in norm:
-            exchanges_seen.add("KUCOIN")
-        elif "BYBIT" in norm:
-            exchanges_seen.add("BYBIT")
-        elif "HTX" in norm or "HUOBI" in norm:
-            exchanges_seen.add("HTX")
-        elif "BINGX" in norm:
-            exchanges_seen.add("BINGX")
-
-    if len(exchanges_seen & TARGET_EXCHANGES) < MIN_EXCHANGES_REQUIRED:
-        return []
-
-    # 3) сети – только ETH / BNB / SOL
-    platforms = coin.get("platforms") or {}
-    symbol = coin.get("symbol", "").upper()
-    name = coin.get("name", "")
-
-    listed_first: Optional[date] = listed_meta.get("first_listed")
-    listed_exchanges: List[str] = sorted(list(listed_meta["exchanges"]))
-
-    for platform_key, addr in platforms.items():
-        addr = (addr or "").strip()
+    candidates: List[Tuple[str, str]] = []
+    for plat_name, addr in platforms.items():
         if not addr:
             continue
-        platform_key_norm = platform_key.strip().lower()
-        chain = PLATFORM_TO_CHAIN.get(platform_key_norm)
-        if not chain:
+        chain = PLATFORM_TO_CHAIN.get(plat_name.lower())
+        if chain in ALLOWED_CHAINS:
+            candidates.append((chain, addr))
+
+    if not candidates:
+        return None
+
+    for ch in priority:
+        for chain, addr in candidates:
+            if chain == ch:
+                return chain, addr
+
+    return candidates[0]
+
+
+def find_token_on_coingecko(symbol: str) -> Optional[Dict]:
+    candidates = coingecko_search_symbol(symbol)
+    if not candidates:
+        print(f"[CG] no search results for symbol {symbol}")
+        return None
+
+    def score(item: Dict) -> Tuple[int, int]:
+        s = (item.get("symbol") or "").lower()
+        exact = 1 if s == symbol.lower() else 0
+        rank = item.get("market_cap_rank")
+        rank_score = 10_000 if rank is None else int(rank)
+        return (-exact, rank_score)
+
+    candidates_sorted = sorted(candidates, key=score)
+
+    for item in candidates_sorted:
+        coin_id = item.get("id")
+        if not coin_id:
             continue
 
-        key = (chain, addr.lower())
-        if key in existing_idx:
+        coin = coingecko_get_coin(coin_id)
+        if not coin:
             continue
 
-        entry: Dict[str, Any] = {
-            "symbol": symbol,
+        platforms = coin.get("platforms") or {}
+        chain_addr = choose_chain_and_address(platforms)
+        if not chain_addr:
+            continue
+
+        chain, address = chain_addr
+        market_data = coin.get("market_data") or {}
+        mcap = (market_data.get("market_cap") or {}).get("usd")
+        vol = (market_data.get("total_volume") or {}).get("usd")
+
+        if mcap is None:
+            continue
+
+        if not (MIN_MCAP_USD <= mcap <= MAX_MCAP_USD):
+            continue
+
+        if vol is not None and vol < MIN_VOLUME_USD:
+            continue
+
+        name = coin.get("name") or item.get("name") or symbol
+
+        return {
+            "symbol": (coin.get("symbol") or symbol).upper(),
             "name": name,
+            "coingecko_id": coin_id,
             "chain": chain,
-            "address": addr,
-            "coingecko_id": coin.get("id"),
-            "active": True,
-            "listedon_exchanges": listed_exchanges,
+            "address": address,
+            "market_cap": mcap,
+            "volume_24h": vol,
         }
-        if listed_first:
-            entry["listedon_first_seen_at"] = listed_first.isoformat()
 
-        entries.append(entry)
-
-    return entries
+    print(f"[CG] no suitable coin found for symbol {symbol}")
+    return None
 
 
 # ----------------------------
-# main
+# token_map.json
 # ----------------------------
 
-def main() -> None:
-    log("Fetching listedon data...")
-    listedon_items = fetch_listedon_items()
-    log(f"Total listedon items collected (no age filter): {len(listedon_items)}")
+def load_token_map(path: Path) -> List[Dict]:
+    if not path.exists():
+        print(f"[TOKEN_MAP] {path} not found, starting from empty list")
+        return []
+    with path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, list):
+        raise RuntimeError("token_map.json must contain a list")
+    print(f"[TOKEN_MAP] Loaded {len(data)} existing tokens")
+    return data
 
-    if not listedon_items:
-        log("No listedon items parsed at all – check HTML structure / selectors.")
+
+def save_token_map(path: Path, tokens: List[Dict]) -> None:
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(tokens, f, ensure_ascii=False, indent=2)
+    print(f"[TOKEN_MAP] Saved {len(tokens)} tokens to {path}")
+
+
+# ----------------------------
+# Main
+# ----------------------------
+
+def main():
+    print("Fetching listedon data...")
+
+    # 1) Собираем кандидатов с exchange-страниц
+    all_rows: List[Tuple[str, str, date, str]] = []  # (symbol, url, date, source_exchange)
+    for exch in SOURCE_EXCHANGES:
+        rows = fetch_exchange_listings(exch)
+        for sym, url, d in rows:
+            all_rows.append((sym, url, d, exch))
+
+    print(f"Total rows from sources (within age window): {len(all_rows)}")
+    if not all_rows:
+        print("No rows in age window, nothing to do.")
         return
 
-    grouped = group_listedon_items(listedon_items)
-    log(f"Grouped into {len(grouped)} unique symbols.")
+    # 2) Группируем по ticker_url
+    candidates_by_url: Dict[str, TickerCandidate] = {}
 
-    candidates_symbols = list(grouped.keys())
-    log(f"Symbols to try on Coingecko (before CG filters): {len(candidates_symbols)}")
+    for sym, url, d, exch in all_rows:
+        cand = candidates_by_url.get(url)
+        if not cand:
+            cand = TickerCandidate(symbol=sym, ticker_url=url)
+            candidates_by_url[url] = cand
+        cand.discovered_on.add(exch)
 
-    existing_tokens = load_token_map(TOKEN_MAP_PATH)
-    existing_idx = build_existing_index(existing_tokens)
-    log(f"Existing tokens: {len(existing_tokens)}")
+    print(f"Unique ticker URLs to inspect: {len(candidates_by_url)}")
 
-    new_entries: List[Dict[str, Any]] = []
-    seen_new_keys: Set[Tuple[str, str]] = set()
+    # 3) Парсим /en/ticker/XXX
+    for url, cand in candidates_by_url.items():
+        full = fetch_ticker_details(cand.symbol, url)
+        cand.listings = full.listings
 
-    for sym in candidates_symbols:
-        meta = grouped[sym]
-        log(f"Searching Coingecko for symbol: {sym}")
-        try:
-            search_results = search_coins_by_symbol(sym)
-        except Exception as exc:
-            log(f"  ! Coingecko search failed for {sym}: {exc}")
-            continue
+    # 4) Фильтр: ≥2 целевые биржи
+    filtered_candidates: List[TickerCandidate] = []
+    for cand in candidates_by_url.values():
+        good_exch = cand.target_exchanges()
+        if len(good_exch) >= 2:
+            filtered_candidates.append(cand)
 
-        if not search_results:
-            log("  No exact symbol matches on Coingecko.")
-            continue
-
-        for coin_stub in search_results:
-            coin_id = coin_stub.get("id")
-            if not coin_id:
-                continue
-            try:
-                coin = coingecko_coin_details(coin_id)
-            except Exception as exc:
-                log(f"  ! Failed to fetch coin details for {coin_id}: {exc}")
-                continue
-
-            entries = token_entries_from_coin(coin, meta, existing_idx)
-            for e in entries:
-                key = (e["chain"], e["address"].lower())
-                if key in seen_new_keys or key in existing_idx:
-                    continue
-                seen_new_keys.add(key)
-                new_entries.append(e)
-
-    log(f"New token entries to add: {len(new_entries)}")
-    if not new_entries:
-        log("No new tokens to add.")
+    print(f"Candidates with >=2 target exchanges: {len(filtered_candidates)}")
+    if not filtered_candidates:
+        print("No candidates after exchange-count filter, nothing to do.")
         return
 
-    updated = existing_tokens + new_entries
-    save_token_map(TOKEN_MAP_PATH, updated)
+    # 5) token_map.json
+    tokens = load_token_map(TOKEN_MAP_PATH)
+
+    existing_ids: Set[str] = set()
+    existing_chain_addr: Set[Tuple[str, str]] = set()
+
+    for t in tokens:
+        cid = (t.get("coingecko_id") or "").lower()
+        if cid:
+            existing_ids.add(cid)
+        chain = (t.get("chain") or "").lower()
+        addr = (t.get("address") or "").lower()
+        if chain and addr:
+            existing_chain_addr.add((chain, addr))
+
+    # 6) CoinGecko + добавление
+    added: List[Dict] = []
+
+    for cand in filtered_candidates:
+        first_date = cand.first_listing_date()
+        first_date_str = first_date.isoformat() if first_date else None
+        exch_list = sorted(list(cand.target_exchanges()))
+
+        print(f"\n[PROCESS] {cand.symbol} ({cand.ticker_url})")
+        print(f"  target exchanges: {', '.join(exch_list)}")
+        print(f"  first listing date (ListedOn): {first_date_str}")
+
+        info = find_token_on_coingecko(cand.symbol)
+        if not info:
+            continue
+
+        cid = info["coingecko_id"].lower()
+        chain = info["chain"].lower()
+        addr = info["address"].lower()
+
+        if cid in existing_ids:
+            print(f"  -> already in token_map by coingecko_id ({cid}), skip")
+            continue
+
+        if (chain, addr) in existing_chain_addr:
+            print(f"  -> already in token_map by chain+address ({chain}, {addr}), skip")
+            continue
+
+        token_entry = {
+            "symbol": info["symbol"],
+            "name": info["name"],
+            "chain": info["chain"],
+            "address": info["address"],
+            "coingecko_id": info["coingecko_id"],
+            "active": True,
+            "listedon_first_listing_date": first_date_str,
+            "listedon_exchanges": exch_list,
+            "listedon_url": cand.ticker_url,
+        }
+
+        tokens.append(token_entry)
+        added.append(token_entry)
+
+        existing_ids.add(cid)
+        existing_chain_addr.add((chain, addr))
+
+        print(f"  -> ADDED to token_map: {info['symbol']} | {info['name']} | {info['chain']} {info['address']}")
+
+    # 7) Сохранение
+    if added:
+        save_token_map(TOKEN_MAP_PATH, tokens)
+        print(f"\nDone. Added {len(added)} new tokens.")
+    else:
+        print("No new tokens to add.")
 
 
 if __name__ == "__main__":
