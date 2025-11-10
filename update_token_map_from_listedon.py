@@ -152,15 +152,16 @@ def parse_listedon_date_td(td) -> Optional[date]:
 def fetch_exchange_candidates(exchange_slug: str,
                               max_pages: int = 10) -> List[Tuple[str, str]]:
     """
-    возвращает список (symbol, ticker_url) для строк на /exchange/{slug}
+    Возвращает список (symbol, ticker_url) для строк на /exchange/{slug}.
 
-    Логика поиска ticker_url в строке:
-      1) <a href=".../ticker/XXX...">
-      2) tr["data-href"] или tr["data-url"], если там /ticker/XXX
-      3) если нашли только URL — символ берём из slug после /ticker/
+    Мы НЕ ищем <a href="/ticker/...">, потому что на серверном HTML
+    его может не быть (добавляется JS-ом).
+
+    Вместо этого:
+      - берём 2-ю колонку (Ticker) у каждой <tr class="item">
+      - символ = текст этой колонки (первое слово)
+      - ticker_url = https://listedon.org/en/ticker/{symbol}
     """
-    from urllib.parse import urljoin
-
     results: List[Tuple[str, str]] = []
 
     for page in range(1, max_pages + 1):
@@ -181,42 +182,32 @@ def fetch_exchange_candidates(exchange_slug: str,
         if not rows:
             break
 
-        skipped_no_ticker = 0
+        added_on_page = 0
 
         for tr in rows:
-            symbol = None
-            ticker_url = None
-
-            # 1) пробуем <a href="/en/ticker/XXX">
-            a = tr.find("a", href=re.compile(r"/ticker/", re.IGNORECASE))
-            if a:
-                href = a.get("href") or ""
-                if "/ticker/" in href:
-                    ticker_url = urljoin(BASE_URL, href)
-                    text_sym = (a.text or "").strip()
-                    if text_sym:
-                        symbol = text_sym.upper()
-
-            # 2) если не нашли — пробуем data-href / data-url на tr
-            if not ticker_url:
-                data_href = tr.get("data-href") or tr.get("data-url")
-                if data_href and "/ticker/" in data_href:
-                    ticker_url = urljoin(BASE_URL, data_href)
-                    m = re.search(r"/ticker/([^/?#]+)", data_href)
-                    if m:
-                        symbol = m.group(1).upper()
-
-            if not ticker_url or not symbol:
-                skipped_no_ticker += 1
+            tds = tr.find_all("td")
+            if len(tds) < 2:
                 continue
 
-            results.append((symbol, ticker_url))
+            # 2-я колонка — Ticker
+            ticker_text = (tds[1].get_text(" ", strip=True) or "").strip()
+            if not ticker_text:
+                continue
 
-        if skipped_no_ticker == len(rows):
-            # если мы вообще ни одну строку на странице не смогли распарсить — зальём подсказку
-            first_row_html = rows[0].prettify() if rows else ""
-            print(f"[{exchange_slug.upper()}]  WARNING: all rows skipped on page {page}, "
-                  f"first row HTML snippet:\n{first_row_html[:500]}")
+            # На всякий случай отрезаем всё лишнее после пробела
+            symbol = ticker_text.split()[0].upper()
+            ticker_url = f"{BASE_URL}/en/ticker/{symbol}"
+
+            results.append((symbol, ticker_url))
+            added_on_page += 1
+
+        if added_on_page == 0:
+            # если с этой страницы вообще ничего не вытащили — покажем пример строки
+            first_html = rows[0].prettify() if rows else ""
+            print(
+                f"[{exchange_slug.upper()}]  WARNING: no symbols extracted on page {page}, "
+                f"first row snippet:\n{first_html[:600]}"
+            )
 
     print(f"[{exchange_slug.upper()}]  Total ticker rows collected: {len(results)}")
     return results
