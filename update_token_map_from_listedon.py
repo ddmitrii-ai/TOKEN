@@ -26,8 +26,7 @@ TARGET_EXCHANGES: Set[str] = {
     "bingx",
 }
 
-# Биржи, с которых берём кандидатов (страницы /en/exchange/{slug})
-# делаем то же самое множество, можно сократить при желании
+# Биржи, с которых собираем кандидатов (страницы /en/exchange/{slug})
 SOURCE_EXCHANGES: List[str] = [
     "mxc",
     "bybit_spot",
@@ -38,15 +37,14 @@ SOURCE_EXCHANGES: List[str] = [
     "bingx",
 ]
 
-# Окно по возрасту листинга НА БИРЖЕ-ИСТОЧНИКЕ
-# Например: [7, 90] = от 1 недели до 3 месяцев
+# Окно по возрасту листинга на ЦЕЛЕВЫХ биржах (по данным тикер-страницы)
 MIN_AGE_DAYS = 7
 MAX_AGE_DAYS = 90
 
 # CoinGecko фильтры
 MIN_MCAP_USD = 3_000_000
 MAX_MCAP_USD = 1_000_000_000
-MIN_VOLUME_USD = 0  # если захочешь, поставишь, например, 200_000
+MIN_VOLUME_USD = 0  # при желании можно поднять, например 200_000
 
 # Какие сети нас интересуют
 ALLOWED_CHAINS = {"ethereum", "bnb", "solana"}
@@ -114,14 +112,20 @@ def http_get(url: str, **kwargs) -> Optional[requests.Response]:
 
 def parse_listedon_date_td(td) -> Optional[date]:
     """
-    td:
+    td на всех таблицах выглядит примерно так:
+
       <td class="date">
         " November 10"
         <span class="year">, 2025</span>
         <br/>
         <span class="time">11:59</span>
       </td>
-    Хотим получить date(2025, 11, 10)
+
+    или на страницах тикера:
+
+      <td class="date">November 10, 2025<br/><span class="time">06:30</span></td>
+
+    Наша задача — вернуть date(2025, 11, 10).
     """
     if td is None:
         return None
@@ -131,11 +135,9 @@ def parse_listedon_date_td(td) -> Optional[date]:
         span.decompose()
 
     text = td.get_text(" ", strip=True)
-    # Приводим к нормальному виду: "November 10, 2025"
     text = " ".join(text.split())
     text = text.replace(" ,", ",")
 
-    # Иногда может быть "November 10 2025" без запятой, пробуем оба формата
     for fmt in ("%B %d, %Y", "%B %d %Y"):
         try:
             dt = datetime.strptime(text, fmt)
@@ -151,16 +153,13 @@ def parse_listedon_date_td(td) -> Optional[date]:
 # Парсинг exchange-страниц
 # ----------------------------
 
-def fetch_exchange_listings(exchange_slug: str,
-                            max_pages: int = 10) -> List[Tuple[str, str, date]]:
+def fetch_exchange_candidates(exchange_slug: str,
+                              max_pages: int = 10) -> List[Tuple[str, str]]:
     """
-    Возвращает список (symbol, ticker_url, listing_date_on_this_exchange)
-    только для строк, которые попадают в окно по возрасту [MIN_AGE_DAYS, MAX_AGE_DAYS].
+    Возвращает список (symbol, ticker_url) для всех строк на /exchange/{slug}
+    БЕЗ фильтра по дате (дату берём позже с /ticker/XXX).
     """
-    today = date.today()
-    print(f"[{exchange_slug.upper()}] Today (server local date) = {today}")
-
-    results: List[Tuple[str, str, date]] = []
+    results: List[Tuple[str, str]] = []
 
     for page in range(1, max_pages + 1):
         url = f"{BASE_URL}/en/exchange/{exchange_slug}/search?page={page}&sort=date&order=1"
@@ -177,31 +176,22 @@ def fetch_exchange_listings(exchange_slug: str,
 
         rows = table.select("tbody tr.item")
         print(f"[{exchange_slug.upper()}]  Rows on page {page}: {len(rows)}")
-
         if not rows:
             break
 
         for tr in rows:
-            date_td = tr.find("td", class_="date")
-            ticker_link = tr.find("a", href=re.compile(r"/en/ticker/"))
-            if not date_td or not ticker_link:
-                continue
-
-            listing_date = parse_listedon_date_td(date_td)
-            if not listing_date:
-                continue
-
-            age = (today - listing_date).days
-            if age < MIN_AGE_DAYS or age > MAX_AGE_DAYS:
+            # Ищем ссылку на тикер
+            ticker_link = tr.find("a", href=re.compile(r"/ticker/"))
+            if not ticker_link:
                 continue
 
             symbol = (ticker_link.text or "").strip().upper()
             href = ticker_link.get("href", "")
             ticker_url = requests.compat.urljoin(BASE_URL, href)
 
-            results.append((symbol, ticker_url, listing_date))
+            results.append((symbol, ticker_url))
 
-    print(f"[{exchange_slug.upper()}]  Total rows collected (within age window): {len(results)}")
+    print(f"[{exchange_slug.upper()}]  Total ticker rows collected: {len(results)}")
     return results
 
 
@@ -249,6 +239,26 @@ def fetch_ticker_details(symbol: str, ticker_url: str) -> TickerCandidate:
                                              listing_date=listing_date))
 
     return cand
+
+
+def listing_age_ok(cand: TickerCandidate,
+                   today: Optional[date] = None) -> bool:
+    """
+    Есть ли хотя бы один листинг на бирже из TARGET_EXCHANGES
+    с возрастом в диапазоне [MIN_AGE_DAYS, MAX_AGE_DAYS]?
+    """
+    if today is None:
+        today = date.today()
+
+    ok = False
+    for l in cand.listings:
+        if l.exchange_slug not in TARGET_EXCHANGES:
+            continue
+        age = (today - l.listing_date).days
+        if MIN_AGE_DAYS <= age <= MAX_AGE_DAYS:
+            ok = True
+            break
+    return ok
 
 
 # ----------------------------
@@ -412,22 +422,22 @@ def save_token_map(path: Path, tokens: List[Dict]) -> None:
 def main():
     print("Fetching listedon data...")
 
-    # 1) Собираем кандидатов с exchange-страниц
-    all_rows: List[Tuple[str, str, date, str]] = []  # (symbol, url, date, source_exchange)
+    # 1) Собираем кандидатов с exchange-страниц (без фильтра по дате)
+    all_rows: List[Tuple[str, str, str]] = []  # (symbol, url, source_exchange)
     for exch in SOURCE_EXCHANGES:
-        rows = fetch_exchange_listings(exch)
-        for sym, url, d in rows:
-            all_rows.append((sym, url, d, exch))
+        rows = fetch_exchange_candidates(exch)
+        for sym, url in rows:
+            all_rows.append((sym, url, exch))
 
-    print(f"Total rows from sources (within age window): {len(all_rows)}")
+    print(f"Total rows from sources (raw, no age filter): {len(all_rows)}")
     if not all_rows:
-        print("No rows in age window, nothing to do.")
+        print("No rows collected from exchanges, nothing to do.")
         return
 
     # 2) Группируем по ticker_url
     candidates_by_url: Dict[str, TickerCandidate] = {}
 
-    for sym, url, d, exch in all_rows:
+    for sym, url, exch in all_rows:
         cand = candidates_by_url.get(url)
         if not cand:
             cand = TickerCandidate(symbol=sym, ticker_url=url)
@@ -436,14 +446,27 @@ def main():
 
     print(f"Unique ticker URLs to inspect: {len(candidates_by_url)}")
 
-    # 3) Парсим /en/ticker/XXX
+    # 3) Парсим /en/ticker/XXX и фильтруем по возрасту
+    today = date.today()
+    filtered_by_age: List[TickerCandidate] = []
+
     for url, cand in candidates_by_url.items():
         full = fetch_ticker_details(cand.symbol, url)
         cand.listings = full.listings
 
+        if not cand.listings:
+            continue
+
+        if not listing_age_ok(cand, today=today):
+            continue
+
+        filtered_by_age.append(cand)
+
+    print(f"Candidates after age filter (at least one listing in [{MIN_AGE_DAYS},{MAX_AGE_DAYS}] days): {len(filtered_by_age)}")
+
     # 4) Фильтр: ≥2 целевые биржи
     filtered_candidates: List[TickerCandidate] = []
-    for cand in candidates_by_url.values():
+    for cand in filtered_by_age:
         good_exch = cand.target_exchanges()
         if len(good_exch) >= 2:
             filtered_candidates.append(cand)
