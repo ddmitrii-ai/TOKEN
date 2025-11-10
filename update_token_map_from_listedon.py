@@ -2,7 +2,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from datetime import datetime, date, timezone
+from datetime import datetime, date
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import requests
@@ -21,7 +21,10 @@ LISTEDON_SOURCES = [
 
 MAX_PAGES_PER_EXCHANGE = int(os.getenv("MAX_PAGES_PER_EXCHANGE", "10"))
 
-# Окно по возрасту: берем монеты с age_days в [MIN_AGE_DAYS, MAX_AGE_DAYS]
+# Пока ВООБЩЕ не режем по возрасту.
+# Будем только парсить дату, сохранять её и смотреть в логах.
+# Фильтр по возрасту легко вернуть потом.
+USE_DATE_WINDOW = False
 MIN_AGE_DAYS = int(os.getenv("MIN_AGE_DAYS", "7"))
 MAX_AGE_DAYS = int(os.getenv("MAX_AGE_DAYS", "90"))
 
@@ -55,7 +58,7 @@ class ListedonItem:
     pair: str
     exchange_slug: str
     exchange_name: str
-    listed_date: date
+    listed_date: Optional[date]
     market_url: str
 
 
@@ -96,16 +99,13 @@ def parse_listedon_date(raw: str) -> Optional[date]:
 
 def fetch_listedon_for_exchange(slug: str, human_name: str) -> List[ListedonItem]:
     """
-    Парсим listedon для биржи. Берём страницы, пока:
-      - не исчерпали MAX_PAGES_PER_EXCHANGE
-      - не встретили записи старше MAX_AGE_DAYS (тогда дальше будет только старее).
-    В эту функцию добавлено подробное логирование дат.
+    Парсим listedon для биржи.
+    Пока НЕ фильтруем по возрасту, просто собираем всё, что найдём на первых N страницах,
+    и логируем первые несколько строк подробно.
     """
     items: List[ListedonItem] = []
-    today = datetime.now(timezone.utc).date()
-
-    log(f"[{human_name}] Today (UTC date) = {today}, "
-        f"MIN_AGE_DAYS={MIN_AGE_DAYS}, MAX_AGE_DAYS={MAX_AGE_DAYS}")
+    today = date.today()
+    log(f"[{human_name}] Today (server local date) = {today}")
 
     debug_rows_logged = 0  # чтобы не заспамить логи
 
@@ -129,7 +129,7 @@ def fetch_listedon_for_exchange(slug: str, human_name: str) -> List[ListedonItem
             log(f"[{human_name}]  ! No rows found, stop")
             break
 
-        stop_due_to_age = False
+        log(f"[{human_name}]  Rows on page {page}: {len(rows)}")
 
         for tr in rows:
             tds = tr.find_all("td")
@@ -149,30 +149,20 @@ def fetch_listedon_for_exchange(slug: str, human_name: str) -> List[ListedonItem
             date_td = tds[-1]
             date_text_raw = date_td.get_text(" ", strip=True)
             listed_date = parse_listedon_date(date_text_raw)
-            if not listed_date:
-                if debug_rows_logged < 10:
-                    log(f"[{human_name}]  !! Could not parse date from '{date_text_raw}'")
-                    debug_rows_logged += 1
-                continue
 
-            age_days = (today - listed_date).days
+            age_days: Optional[int] = None
+            if listed_date:
+                age_days = (today - listed_date).days
 
-            if debug_rows_logged < 10:
+            if debug_rows_logged < 20:
                 log(
                     f"[{human_name}]  row debug: pair='{pair_text}', "
                     f"raw_date='{date_text_raw}', parsed_date={listed_date}, age_days={age_days}"
                 )
                 debug_rows_logged += 1
 
-            # слишком новый — младше нижней границы
-            if age_days < MIN_AGE_DAYS:
-                continue
-
-            # слишком старый — старше верхней границы, дальше будет ещё старее
-            if age_days > MAX_AGE_DAYS:
-                stop_due_to_age = True
-                break
-
+            # сейчас НИЧЕГО не фильтруем по age_days,
+            # просто складываем всё, чтобы убедиться, что парсинг норм.
             items.append(
                 ListedonItem(
                     symbol=base_symbol,
@@ -184,11 +174,7 @@ def fetch_listedon_for_exchange(slug: str, human_name: str) -> List[ListedonItem
                 )
             )
 
-        if stop_due_to_age:
-            log(f"[{human_name}]  Reached items older than {MAX_AGE_DAYS} days, stop paging.")
-            break
-
-    log(f"[{human_name}]  Found {len(items)} items within date window.")
+    log(f"[{human_name}]  Total rows collected (no age filter): {len(items)}")
     return items
 
 
@@ -278,7 +264,7 @@ def group_listedon_items(items: List[ListedonItem]) -> Dict[str, Dict[str, Any]]
             },
         )
         g["exchanges"].add(it.exchange_name)
-        if it.listed_date < g["first_listed"]:
+        if it.listed_date and (g["first_listed"] is None or it.listed_date < g["first_listed"]):
             g["first_listed"] = it.listed_date
     return grouped
 
@@ -341,7 +327,7 @@ def token_entries_from_coin(
     symbol = coin.get("symbol", "").upper()
     name = coin.get("name", "")
 
-    listed_first: date = listed_meta["first_listed"]
+    listed_first: Optional[date] = listed_meta.get("first_listed")
     listed_exchanges: List[str] = sorted(list(listed_meta["exchanges"]))
 
     for platform_key, addr in platforms.items():
@@ -357,18 +343,19 @@ def token_entries_from_coin(
         if key in existing_idx:
             continue
 
-        entries.append(
-            {
-                "symbol": symbol,
-                "name": name,
-                "chain": chain,
-                "address": addr,
-                "coingecko_id": coin.get("id"),
-                "active": True,
-                "listedon_first_seen_at": listed_first.isoformat(),
-                "listedon_exchanges": listed_exchanges,
-            }
-        )
+        entry: Dict[str, Any] = {
+            "symbol": symbol,
+            "name": name,
+            "chain": chain,
+            "address": addr,
+            "coingecko_id": coin.get("id"),
+            "active": True,
+            "listedon_exchanges": listed_exchanges,
+        }
+        if listed_first:
+            entry["listedon_first_seen_at"] = listed_first.isoformat()
+
+        entries.append(entry)
 
     return entries
 
@@ -376,20 +363,17 @@ def token_entries_from_coin(
 def main() -> None:
     log("Fetching listedon data...")
     listedon_items = fetch_listedon_items()
-    log(f"Total listedon items (raw, within window): {len(listedon_items)}")
+    log(f"Total listedon items collected (no age filter): {len(listedon_items)}")
 
     if not listedon_items:
-        log("No listedon items in the configured date window.")
+        log("No listedon items parsed at all – check HTML structure / selectors.")
         return
 
     grouped = group_listedon_items(listedon_items)
     log(f"Grouped into {len(grouped)} unique symbols.")
 
-    candidates_symbols = [
-        sym for sym, meta in grouped.items()
-        if len(meta["exchanges"]) >= 1
-    ]
-    log(f"Symbols passing listedon-exchange-count filter: {len(candidates_symbols)}")
+    candidates_symbols = list(grouped.keys())
+    log(f"Symbols to try on Coingecko (before any listedon-exchange filter): {len(candidates_symbols)}")
 
     existing_tokens = load_token_map(TOKEN_MAP_PATH)
     existing_idx = build_existing_index(existing_tokens)
