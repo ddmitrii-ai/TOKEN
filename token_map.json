@@ -63,4 +63,60 @@
     "coingecko_id": "soon-2",
     "active": true
   }
+  {
+    "symbol": "BAS",
+    "name": "BAS",
+    "chain": "bnb",
+    "address": "0x0f0df6cb17ee5e883eddfef9153fc6036bdb4e37",
+    "coingecko_id": "bnb-attestation-service",
+    "active": true
+  }
+    {
+    "symbol": "MCRT",
+    "name": "MAGICCRAFT",
+    "chain": "bnb",
+    "address": "0x4b8285ab433d8f69cb48d5ad62b415ed1a221e4f",
+    "coingecko_id": "magiccraft",
+    "active": true
+  }
+   {
+    "symbol": "PORT3",
+    "name": "PORT3",
+    "chain": "bnb",
+    "address": "0xb4357054c3da8d46ed642383f03139ac7f090343",
+    "coingecko_id": "port3-network",
+    "active": true
+  }
+  {
+    "symbol": "KP3R",
+    "name": "KP3R",
+    "chain": "ethereum",
+    "address": "0x1ceb5cb57c4d4e2b2433641b95dd330a33185a44",
+    "coingecko_id": "keep3rv1",
+    "active": true
+  }
+  {
+    "symbol": "REEF",
+    "name": "REEF",
+    "chain": "bnb",
+    "address": "0xf21768ccbc73ea5b6fd3c687208a7c2def2d966e",
+    "coingecko_id": "reef",
+    "active": true
+  }
+  {
+    "symbol": "S",
+    "name": "SONIC",
+    "chain": "sonic",
+    "address": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "coingecko_id": "sonic",
+    "active": true
+  }
+  {
+    "symbol": "FORM",
+    "name": "FORM",
+    "chain": "bnb",
+    "address": "0x5b73a93b4e5e4f1fd27d8b3f8c97d69908b5e284",
+    "coingecko_id": "four",
+    "active": true
+  }
 ]
