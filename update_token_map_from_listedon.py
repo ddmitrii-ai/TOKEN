@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import re
 import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -14,10 +15,9 @@ from bs4 import BeautifulSoup
 # Конфиг
 # ------------------------
 
-# Путь к token_map.json (лежит рядом со скриптом)
 TOKEN_MAP_PATH = Path(__file__).with_name("token_map.json")
 
-# Биржи, которые парсим на listedon
+# Биржи на listedon
 EXCHANGES = [
     ("mxc", "MEXC"),
     ("bybit_spot", "Bybit Spot"),
@@ -29,11 +29,10 @@ EXCHANGES = [
 ]
 
 # Ограничения по возрасту листинга (в днях)
-# Пример: MIN_AGE_DAYS=7, MAX_AGE_DAYS=90
 MIN_AGE_DAYS = int(os.getenv("MIN_AGE_DAYS", "7"))
 MAX_AGE_DAYS = int(os.getenv("MAX_AGE_DAYS", "90"))
 
-# Минимальное количество бирж из списка, на которых должен быть тикер
+# Минимальное количество бирж для одного тикера
 MIN_EXCHANGES = int(os.getenv("MIN_EXCHANGES", "2"))
 
 # Фильтр по капитализации (USD)
@@ -58,7 +57,6 @@ def http_get(url: str, params: Optional[Dict[str, Any]] = None) -> Optional[requ
         "User-Agent": "Mozilla/5.0 (MaTT-listedon-bot)",
         "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
     }
-    # если используешь Pro-ключ CoinGecko:
     if COINGECKO_API_KEY and "coingecko.com" in url:
         headers["x-cg-pro-api-key"] = COINGECKO_API_KEY
 
@@ -74,8 +72,53 @@ def http_get(url: str, params: Optional[Dict[str, Any]] = None) -> Optional[requ
 
 
 # ------------------------
-# Парсинг listedon для биржи
+# Парсинг listedon
 # ------------------------
+
+
+def pick_listedon_table(soup: BeautifulSoup) -> Optional[Any]:
+    """
+    На странице может быть несколько таблиц.
+    Выбираем ту, где в thead есть 'Ticker' и 'Pairs'.
+    """
+    tables = soup.find_all("table")
+    if not tables:
+        return None
+
+    chosen = None
+    for idx, t in enumerate(tables):
+        thead = t.find("thead")
+        if not thead:
+            continue
+        header_text = thead.get_text(" ", strip=True).lower()
+        if "ticker" in header_text and "pairs" in header_text:
+            chosen = t
+            print(f"  -> Using table #{idx} with header: {header_text!r}")
+            break
+
+    if not chosen:
+        print("  -> No table with 'ticker'/'pairs' header found; using first table as fallback")
+        chosen = tables[0]
+
+    return chosen
+
+
+DATE_REGEX = re.compile(r"[A-Za-z]+\s+\d{1,2},\s+\d{4}")
+
+
+def parse_listedon_date(text: str) -> Optional[datetime.date]:
+    """
+    Ищем в тексте подпоследовательность вида 'November 10, 2025'
+    и парсим её.
+    """
+    m = DATE_REGEX.search(text)
+    if not m:
+        return None
+    date_str = m.group(0)
+    try:
+        return datetime.datetime.strptime(date_str, "%B %d, %Y").date()
+    except ValueError:
+        return None
 
 
 def fetch_listedon_for_exchange(
@@ -84,21 +127,7 @@ def fetch_listedon_for_exchange(
     max_pages: int = MAX_PAGES_PER_EXCHANGE,
 ) -> List[Dict[str, Any]]:
     """
-    Парсим listedon для одной биржи:
-
-      https://listedon.org/en/exchange/{exchange_slug}/search?page=X&sort=date&order=1
-
-    Структура (важный момент):
-      - строка с датой: <tr><th colspan="4">November 10, 2025</th></tr>
-      - далее несколько строк:
-          <tr>
-            <td>11:59</td>
-            <td>BNBHOLDER</td>
-            <td>Listing</td>
-            <td><a href="/en/ticker/BNBHOLDER">BNBHOLDER/USDT</a></td>
-          </tr>
-
-    Мы учитываем и <th>, и <td>.
+    Парсим listedon для заданной биржи.
     """
     base_url = f"https://listedon.org/en/exchange/{exchange_slug}/search"
     today = datetime.date.today()
@@ -115,7 +144,7 @@ def fetch_listedon_for_exchange(
 
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        table = soup.find("table")
+        table = pick_listedon_table(soup)
         if not table:
             print(f"[{exchange_label}]  No table on page {page}")
             continue
@@ -124,59 +153,69 @@ def fetch_listedon_for_exchange(
         rows = tbody.find_all("tr")
         print(f"[{exchange_label}]  Rows on page {page}: {len(rows)}")
 
+        # DEBUG: первые 10 строк первой страницы — печатаем, чтобы понять структуру
+        if page == 1:
+            print(f"[{exchange_label}]  DEBUG: first 10 <tr> on page 1:")
+            for idx, tr in enumerate(rows[:10]):
+                cells = tr.find_all(["th", "td"])
+                texts = [c.get_text(" ", strip=True) for c in cells]
+                tag_names = [c.name for c in cells]
+                print(f"    row#{idx}: tags={tag_names} texts={texts!r}")
+
         current_date: Optional[datetime.date] = None
 
         for tr in rows:
-            # ВАЖНО: смотрим и на <td>, и на <th>
-            cells = tr.find_all(["td", "th"])
+            cells = tr.find_all(["th", "td"])
             if not cells:
                 continue
 
-            # --- строка с датой (одна ячейка вида "November 10, 2025") ---
+            cell_texts = [c.get_text(" ", strip=True) for c in cells]
+
+            # --- Пытаемся найти дату в любой строке с 1 ячейкой ---
             if len(cells) == 1:
-                txt = cells[0].get_text(" ", strip=True)
-                # пробуем распарсить дату
-                try:
-                    current_date = datetime.datetime.strptime(txt, "%B %d, %Y").date()
-                except ValueError:
-                    # не дата — игнорируем
-                    pass
+                d = parse_listedon_date(cell_texts[0])
+                if d:
+                    current_date = d
                 continue
 
-            # --- строка с листингом: Time | Ticker | Type | Pairs ---
-            if len(cells) >= 4:
-                if current_date is None:
-                    # если ещё не было строки с датой — пропускаем
-                    continue
+            # Если уже есть current_date, пробуем трактовать строки как листинг:
+            # ожидаем формат: Time | Ticker | Type | Pairs
+            if current_date is None:
+                # не знаем дату — не берём эти строки
+                continue
 
-                time_str = cells[0].get_text(" ", strip=True)
-                ticker = cells[1].get_text(" ", strip=True)
-                list_type = cells[2].get_text(" ", strip=True)
-                pairs_cell = cells[3]
-                pairs_text = pairs_cell.get_text(" ", strip=True)
+            if len(cells) < 3:
+                continue
 
-                if list_type.lower() != "listing":
-                    continue
+            time_str = cell_texts[0]
+            ticker = cell_texts[1]
+            list_type = cell_texts[2]
 
-                # ссылка на страницу тикера: /en/ticker/XXX
-                pair_link = pairs_cell.find("a")
-                ticker_url = (
-                    urljoin("https://listedon.org", pair_link["href"])
-                    if pair_link and pair_link.has_attr("href")
-                    else None
-                )
+            # в четвёртой ячейке, как правило, пары и ссылка на /en/ticker/XXX
+            pairs_text = cell_texts[3] if len(cells) >= 4 else ""
+            pairs_cell = cells[3] if len(cells) >= 4 else cells[-1]
 
-                items.append(
-                    {
-                        "symbol": ticker.strip(),
-                        "pair": pairs_text,
-                        "exchange_slug": exchange_slug,
-                        "exchange_label": exchange_label,
-                        "listedon_date": current_date.isoformat(),
-                        "listedon_time": time_str,
-                        "listedon_ticker_url": ticker_url,
-                    }
-                )
+            if "listing" not in list_type.lower():
+                continue
+
+            pair_link = pairs_cell.find("a")
+            ticker_url = (
+                urljoin("https://listedon.org", pair_link["href"])
+                if pair_link and pair_link.has_attr("href")
+                else None
+            )
+
+            items.append(
+                {
+                    "symbol": ticker.strip(),
+                    "pair": pairs_text,
+                    "exchange_slug": exchange_slug,
+                    "exchange_label": exchange_label,
+                    "listedon_date": current_date.isoformat(),
+                    "listedon_time": time_str,
+                    "listedon_ticker_url": ticker_url,
+                }
+            )
 
     print(f"[{exchange_label}]  Total rows collected (no age filter): {len(items)}")
     return items
@@ -188,18 +227,6 @@ def fetch_listedon_for_exchange(
 
 
 def aggregate_listedon_items(all_items: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    """
-    Группируем по тикеру (symbol):
-      {
-        "SYMBOL": {
-          "symbol": "SYMBOL",
-          "entries": [...],
-          "exchanges": {"MEXC", "Gate.io", ...},
-          "first_date": date,
-        },
-        ...
-      }
-    """
     by_symbol: Dict[str, Dict[str, Any]] = {}
     for it in all_items:
         sym = it["symbol"].strip().upper()
@@ -223,7 +250,7 @@ def aggregate_listedon_items(all_items: List[Dict[str, Any]]) -> Dict[str, Dict[
 
 
 # ------------------------
-# Работа с token_map.json
+# token_map.json helpers
 # ------------------------
 
 
@@ -258,10 +285,6 @@ def save_token_map(path: Path, tokens: List[Dict[str, Any]]) -> None:
 
 
 def coingecko_search_symbol(symbol: str) -> Optional[Dict[str, Any]]:
-    """
-    Поиск монеты по тикеру через /search.
-    Возвращаем лучшую по совпадению symbol.
-    """
     url = f"{COINGECKO_BASE}/search"
     resp = http_get(url, params={"query": symbol})
     if not resp:
@@ -278,20 +301,14 @@ def coingecko_search_symbol(symbol: str) -> Optional[Dict[str, Any]]:
 
     symbol_lower = symbol.lower()
 
-    # 1) точное совпадение по symbol
     exact = [c for c in coins if (c.get("symbol") or "").lower() == symbol_lower]
     if exact:
         return exact[0]
 
-    # 2) иначе первая
     return coins[0]
 
 
 def coingecko_fetch_coin_details(coin_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Берём подробную инфу по монете:
-      /coins/{id}?market_data=true&...
-    """
     url = f"{COINGECKO_BASE}/coins/{coin_id}"
     params = {
         "localization": "false",
@@ -311,10 +328,6 @@ def coingecko_fetch_coin_details(coin_id: str) -> Optional[Dict[str, Any]]:
 
 
 def choose_platform_and_chain(coin_details: Dict[str, Any]) -> Optional[Tuple[str, str]]:
-    """
-    Выбираем сеть и адрес контракта:
-      цепочки в token_map.json: "ethereum" | "bnb" | "solana"
-    """
     platforms = coin_details.get("platforms") or {}
     platforms_norm = {k.lower(): v for k, v in platforms.items() if v}
 
@@ -344,7 +357,7 @@ def get_market_cap_usd(coin_details: Dict[str, Any]) -> Optional[float]:
 
 
 # ------------------------
-# Main logic
+# Main
 # ------------------------
 
 
@@ -353,7 +366,7 @@ def main() -> None:
 
     all_items: List[Dict[str, Any]] = []
 
-    # 1. Собираем все листинги со всех бирж
+    # 1. Собираем данные по всем биржам
     for slug, label in EXCHANGES:
         items = fetch_listedon_for_exchange(slug, label, max_pages=MAX_PAGES_PER_EXCHANGE)
         all_items.extend(items)
@@ -394,7 +407,7 @@ def main() -> None:
         print("No candidates after filters.")
         return
 
-    # 3. Загружаем текущий token_map.json
+    # 3. Текущее token_map
     existing_tokens = load_token_map(TOKEN_MAP_PATH)
     print(f"Existing tokens: {len(existing_tokens)}")
 
@@ -415,7 +428,7 @@ def main() -> None:
     print()
     print("Querying CoinGecko for candidates...")
 
-    # 4. Для каждого кандидата — CoinGecko и фильтры
+    # 4. CoinGecko по каждому кандидату
     for info in candidates:
         sym = info["symbol"]
         exchanges = sorted(info["exchanges"])
