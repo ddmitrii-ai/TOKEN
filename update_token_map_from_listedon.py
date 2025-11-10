@@ -21,9 +21,7 @@ LISTEDON_SOURCES = [
 
 MAX_PAGES_PER_EXCHANGE = int(os.getenv("MAX_PAGES_PER_EXCHANGE", "10"))
 
-# Пока ВООБЩЕ не режем по возрасту.
-# Будем только парсить дату, сохранять её и смотреть в логах.
-# Фильтр по возрасту легко вернуть потом.
+# Пока вообще НЕ режем по возрасту, только парсим и логируем
 USE_DATE_WINDOW = False
 MIN_AGE_DAYS = int(os.getenv("MIN_AGE_DAYS", "7"))
 MAX_AGE_DAYS = int(os.getenv("MAX_AGE_DAYS", "90"))
@@ -70,6 +68,9 @@ def log(msg: str) -> None:
 # Парсинг listedon
 # ----------------------------
 
+MONTH_PATTERN = r"(January|February|March|April|May|June|July|August|September|October|November|December)"
+
+
 def extract_date_part(raw: str) -> Optional[str]:
     """
     Из текста ячейки (например 'October 23, 2025 15:14' или с переносами)
@@ -97,17 +98,64 @@ def parse_listedon_date(raw: str) -> Optional[date]:
         return None
 
 
+PAIR_REGEX = re.compile(r"\b([A-Z0-9\.\-]{2,15})/([A-Z0-9]{2,10})\b")
+
+
+def find_pair_in_row(tr) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Ищем строку вида 'AAA/BBBB' в любом <td> строки.
+    Возвращаем (pair_text, base_symbol) или (None, None).
+    """
+    tds = tr.find_all("td")
+    if not tds:
+        return None, None
+
+    for td in tds:
+        txt = td.get_text(" ", strip=True)
+        m = PAIR_REGEX.search(txt)
+        if m:
+            pair = m.group(0)
+            base = m.group(1).upper()
+            return pair, base
+    return None, None
+
+
+def find_date_in_row(tr) -> Tuple[Optional[str], Optional[date]]:
+    """
+    Берём текст последнего <td> и пытаемся вытащить дату.
+    Если не получилось — пробуем найти дату в любом td с месяцем.
+    """
+    tds = tr.find_all("td")
+    if not tds:
+        return None, None
+
+    # сначала пробуем последний столбец
+    last_txt = tds[-1].get_text(" ", strip=True)
+    d = parse_listedon_date(last_txt)
+    if d:
+        return last_txt, d
+
+    # fallback: ищем td с месяцем
+    for td in reversed(tds):
+        txt = td.get_text(" ", strip=True)
+        if re.search(MONTH_PATTERN, txt):
+            d2 = parse_listedon_date(txt)
+            if d2:
+                return txt, d2
+
+    return last_txt or None, None
+
+
 def fetch_listedon_for_exchange(slug: str, human_name: str) -> List[ListedonItem]:
     """
     Парсим listedon для биржи.
-    Пока НЕ фильтруем по возрасту, просто собираем всё, что найдём на первых N страницах,
-    и логируем первые несколько строк подробно.
+    НЕ фильтруем по возрасту, просто собираем всё и логируем первые несколько строк.
     """
     items: List[ListedonItem] = []
     today = date.today()
     log(f"[{human_name}] Today (server local date) = {today}")
 
-    debug_rows_logged = 0  # чтобы не заспамить логи
+    debug_rows_logged = 0
 
     for page in range(1, MAX_PAGES_PER_EXCHANGE + 1):
         url = f"https://listedon.org/en/exchange/{slug}/search?page={page}&sort=date&order=1"
@@ -131,38 +179,38 @@ def fetch_listedon_for_exchange(slug: str, human_name: str) -> List[ListedonItem
 
         log(f"[{human_name}]  Rows on page {page}: {len(rows)}")
 
-        for tr in rows:
-            tds = tr.find_all("td")
-            if len(tds) < 2:
-                continue
+        for idx, tr in enumerate(rows, start=1):
+            # пробуем найти пару в строке
+            pair_text, base_symbol = find_pair_in_row(tr)
 
-            # 0-й столбец — market/pair вида "RZTO/USDT"
-            pair_text = tds[0].get_text(" ", strip=True)
-            if not pair_text or "/" not in pair_text:
-                continue
-            base_symbol = pair_text.split("/")[0].strip().upper()
-
-            link_tag = tds[0].find("a")
-            market_url = link_tag["href"] if link_tag and link_tag.has_attr("href") else ""
-
-            # последний столбец — дата (с временем), нам нужна только дата
-            date_td = tds[-1]
-            date_text_raw = date_td.get_text(" ", strip=True)
-            listed_date = parse_listedon_date(date_text_raw)
+            # пробуем спарсить дату
+            raw_date_text, listed_date = find_date_in_row(tr)
 
             age_days: Optional[int] = None
             if listed_date:
                 age_days = (today - listed_date).days
 
             if debug_rows_logged < 20:
+                # выводим краткий debug по первой 20 строчек
+                row_text = tr.get_text(" | ", strip=True)
                 log(
-                    f"[{human_name}]  row debug: pair='{pair_text}', "
-                    f"raw_date='{date_text_raw}', parsed_date={listed_date}, age_days={age_days}"
+                    f"[{human_name}]  row#{idx} debug: "
+                    f"row_text='{row_text[:200]}', "
+                    f"pair='{pair_text}', "
+                    f"base_symbol='{base_symbol}', "
+                    f"raw_date='{raw_date_text}', "
+                    f"parsed_date={listed_date}, age_days={age_days}"
                 )
                 debug_rows_logged += 1
 
-            # сейчас НИЧЕГО не фильтруем по age_days,
-            # просто складываем всё, чтобы убедиться, что парсинг норм.
+            # если не нашли пару — пропускаем
+            if not pair_text or not base_symbol:
+                continue
+
+            link_tag = tr.find("a")
+            market_url = link_tag["href"] if link_tag and link_tag.has_attr("href") else ""
+
+            # Здесь пока НЕ режем по возрасту (USE_DATE_WINDOW=False)
             items.append(
                 ListedonItem(
                     symbol=base_symbol,
