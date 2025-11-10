@@ -29,7 +29,7 @@ EXCHANGES = [
 ]
 
 # Ограничения по возрасту листинга (в днях)
-# По умолчанию: от 7 до 90 дней
+# Пример: MIN_AGE_DAYS=7, MAX_AGE_DAYS=90
 MIN_AGE_DAYS = int(os.getenv("MIN_AGE_DAYS", "7"))
 MAX_AGE_DAYS = int(os.getenv("MAX_AGE_DAYS", "90"))
 
@@ -37,8 +37,8 @@ MAX_AGE_DAYS = int(os.getenv("MAX_AGE_DAYS", "90"))
 MIN_EXCHANGES = int(os.getenv("MIN_EXCHANGES", "2"))
 
 # Фильтр по капитализации (USD)
-MCAP_MIN = float(os.getenv("MCAP_MIN", str(3_000_000)))   # 3M
-MCAP_MAX = float(os.getenv("MCAP_MAX", str(1_000_000_000)))  # 1B
+MCAP_MIN = float(os.getenv("MCAP_MIN", str(3_000_000)))        # 3M
+MCAP_MAX = float(os.getenv("MCAP_MAX", str(1_000_000_000)))    # 1B
 
 # Ограничение страниц на listedon (на каждую биржу)
 MAX_PAGES_PER_EXCHANGE = int(os.getenv("MAX_PAGES_PER_EXCHANGE", "10"))
@@ -58,6 +58,7 @@ def http_get(url: str, params: Optional[Dict[str, Any]] = None) -> Optional[requ
         "User-Agent": "Mozilla/5.0 (MaTT-listedon-bot)",
         "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
     }
+    # если используешь Pro-ключ CoinGecko:
     if COINGECKO_API_KEY and "coingecko.com" in url:
         headers["x-cg-pro-api-key"] = COINGECKO_API_KEY
 
@@ -84,15 +85,20 @@ def fetch_listedon_for_exchange(
 ) -> List[Dict[str, Any]]:
     """
     Парсим listedon для одной биржи:
+
       https://listedon.org/en/exchange/{exchange_slug}/search?page=X&sort=date&order=1
 
-    Структура таблицы:
-      - строка с датой: одна <td> вида "November 10, 2025"
+    Структура (важный момент):
+      - строка с датой: <tr><th colspan="4">November 10, 2025</th></tr>
       - далее несколько строк:
-          Time | Ticker | Type | Pairs
+          <tr>
+            <td>11:59</td>
+            <td>BNBHOLDER</td>
+            <td>Listing</td>
+            <td><a href="/en/ticker/BNBHOLDER">BNBHOLDER/USDT</a></td>
+          </tr>
 
-    Собираем:
-      symbol (Ticker), пара, дата листинга, время, ссылка на /en/ticker/...
+    Мы учитываем и <th>, и <td>.
     """
     base_url = f"https://listedon.org/en/exchange/{exchange_slug}/search"
     today = datetime.date.today()
@@ -121,42 +127,44 @@ def fetch_listedon_for_exchange(
         current_date: Optional[datetime.date] = None
 
         for tr in rows:
-            tds = tr.find_all("td")
-            if not tds:
+            # ВАЖНО: смотрим и на <td>, и на <th>
+            cells = tr.find_all(["td", "th"])
+            if not cells:
                 continue
 
             # --- строка с датой (одна ячейка вида "November 10, 2025") ---
-            if len(tds) == 1:
-                txt = tds[0].get_text(" ", strip=True)
+            if len(cells) == 1:
+                txt = cells[0].get_text(" ", strip=True)
+                # пробуем распарсить дату
                 try:
                     current_date = datetime.datetime.strptime(txt, "%B %d, %Y").date()
                 except ValueError:
-                    # не похоже на дату — игнорируем
+                    # не дата — игнорируем
                     pass
                 continue
 
             # --- строка с листингом: Time | Ticker | Type | Pairs ---
-            if len(tds) >= 4:
+            if len(cells) >= 4:
                 if current_date is None:
-                    # если дату ещё не встретили — пропускаем
+                    # если ещё не было строки с датой — пропускаем
                     continue
 
-                time_str = tds[0].get_text(" ", strip=True)
-                ticker = tds[1].get_text(" ", strip=True)
-                list_type = tds[2].get_text(" ", strip=True)
-                pairs_td = tds[3]
-                pairs_text = pairs_td.get_text(" ", strip=True)
+                time_str = cells[0].get_text(" ", strip=True)
+                ticker = cells[1].get_text(" ", strip=True)
+                list_type = cells[2].get_text(" ", strip=True)
+                pairs_cell = cells[3]
+                pairs_text = pairs_cell.get_text(" ", strip=True)
 
-                # ссылка на тикер (страница вида /en/ticker/BNBHOLDER)
-                pair_link = pairs_td.find("a")
+                if list_type.lower() != "listing":
+                    continue
+
+                # ссылка на страницу тикера: /en/ticker/XXX
+                pair_link = pairs_cell.find("a")
                 ticker_url = (
                     urljoin("https://listedon.org", pair_link["href"])
                     if pair_link and pair_link.has_attr("href")
                     else None
                 )
-
-                if list_type.lower() != "listing":
-                    continue
 
                 items.append(
                     {
@@ -252,7 +260,7 @@ def save_token_map(path: Path, tokens: List[Dict[str, Any]]) -> None:
 def coingecko_search_symbol(symbol: str) -> Optional[Dict[str, Any]]:
     """
     Поиск монеты по тикеру через /search.
-    Возвращаем лучшую подходящую (по совпадению symbol).
+    Возвращаем лучшую по совпадению symbol.
     """
     url = f"{COINGECKO_BASE}/search"
     resp = http_get(url, params={"query": symbol})
@@ -270,20 +278,19 @@ def coingecko_search_symbol(symbol: str) -> Optional[Dict[str, Any]]:
 
     symbol_lower = symbol.lower()
 
-    # 1) точное совпадение по symbol (регистр не важен)
+    # 1) точное совпадение по symbol
     exact = [c for c in coins if (c.get("symbol") or "").lower() == symbol_lower]
     if exact:
-        # если несколько – возьмём первую
         return exact[0]
 
-    # 2) иначе первая вообще
+    # 2) иначе первая
     return coins[0]
 
 
 def coingecko_fetch_coin_details(coin_id: str) -> Optional[Dict[str, Any]]:
     """
     Берём подробную инфу по монете:
-      /coins/{id}?market_data=true&community_data=false&...
+      /coins/{id}?market_data=true&...
     """
     url = f"{COINGECKO_BASE}/coins/{coin_id}"
     params = {
@@ -305,19 +312,15 @@ def coingecko_fetch_coin_details(coin_id: str) -> Optional[Dict[str, Any]]:
 
 def choose_platform_and_chain(coin_details: Dict[str, Any]) -> Optional[Tuple[str, str]]:
     """
-    Выбираем сеть и адрес контракта для нашей схемы:
-      chain в token_map.json: "ethereum" | "bnb" | "solana"
-
-    В CoinGecko это лежит в coin["platforms"].
+    Выбираем сеть и адрес контракта:
+      цепочки в token_map.json: "ethereum" | "bnb" | "solana"
     """
     platforms = coin_details.get("platforms") or {}
-    # ключи у CoinGecko в нижнем регистре типа "ethereum", "binance-smart-chain", "solana"
     platforms_norm = {k.lower(): v for k, v in platforms.items() if v}
 
     if "ethereum" in platforms_norm:
         return "ethereum", platforms_norm["ethereum"]
 
-    # BNB chain
     for k in ("binance-smart-chain", "bsc", "bnb-smart-chain"):
         if k in platforms_norm:
             return "bnb", platforms_norm[k]
@@ -350,6 +353,7 @@ def main() -> None:
 
     all_items: List[Dict[str, Any]] = []
 
+    # 1. Собираем все листинги со всех бирж
     for slug, label in EXCHANGES:
         items = fetch_listedon_for_exchange(slug, label, max_pages=MAX_PAGES_PER_EXCHANGE)
         all_items.extend(items)
@@ -360,6 +364,7 @@ def main() -> None:
         print("No listedon items parsed at all – check HTML structure / selectors.")
         return
 
+    # 2. Агрегируем по тикеру
     by_symbol = aggregate_listedon_items(all_items)
 
     today = datetime.date.today()
@@ -380,13 +385,16 @@ def main() -> None:
 
         candidates.append(info)
 
-    print(f"Candidates after exchange-count >= {MIN_EXCHANGES} and age in [{MIN_AGE_DAYS}, {MAX_AGE_DAYS}] days: {len(candidates)}")
+    print(
+        f"Candidates after exchange-count >= {MIN_EXCHANGES} "
+        f"and age in [{MIN_AGE_DAYS}, {MAX_AGE_DAYS}] days: {len(candidates)}"
+    )
 
     if not candidates:
         print("No candidates after filters.")
         return
 
-    # Загружаем текущий token_map.json
+    # 3. Загружаем текущий token_map.json
     existing_tokens = load_token_map(TOKEN_MAP_PATH)
     print(f"Existing tokens: {len(existing_tokens)}")
 
@@ -407,6 +415,7 @@ def main() -> None:
     print()
     print("Querying CoinGecko for candidates...")
 
+    # 4. Для каждого кандидата — CoinGecko и фильтры
     for info in candidates:
         sym = info["symbol"]
         exchanges = sorted(info["exchanges"])
@@ -414,7 +423,6 @@ def main() -> None:
 
         print(f"  [symbol={sym}] exchanges={exchanges}, first_date={first_date.isoformat()}")
 
-        # 1) поиск по symbol
         search_res = coingecko_search_symbol(sym)
         if not search_res:
             print(f"    -> No CoinGecko search result for symbol {sym}")
@@ -429,13 +437,11 @@ def main() -> None:
             print(f"    -> Already in token_map by coingecko_id={coin_id}, skipping")
             continue
 
-        # 2) подробная инфа
         details = coingecko_fetch_coin_details(coin_id)
         if not details:
             print(f"    -> Failed to fetch details for {coin_id}")
             continue
 
-        # 3) платформа / сеть / адрес
         plat = choose_platform_and_chain(details)
         if not plat:
             print(f"    -> No supported platform (ethereum/bnb/solana) for {coin_id}")
@@ -444,20 +450,21 @@ def main() -> None:
         chain, address = plat
         addr_key = (chain.lower(), address.lower())
         if addr_key in existing_by_chain_addr:
-            print(f"    -> Token with same chain+address already exists in token_map, skipping")
+            print("    -> Token with same chain+address already exists in token_map, skipping")
             continue
 
-        # 4) капитализация
         mcap = get_market_cap_usd(details)
         if mcap is None:
             print(f"    -> No market cap data for {coin_id}, skipping")
             continue
 
         if not (MCAP_MIN <= mcap <= MCAP_MAX):
-            print(f"    -> Market cap {mcap:,.0f} out of range [{MCAP_MIN:,.0f}, {MCAP_MAX:,.0f}], skipping")
+            print(
+                f"    -> Market cap {mcap:,.0f} out of range "
+                f"[{MCAP_MIN:,.0f}, {MCAP_MAX:,.0f}], skipping"
+            )
             continue
 
-        # Ок, можно добавлять
         token_obj: Dict[str, Any] = {
             "symbol": sym,
             "name": details.get("name") or sym,
@@ -465,19 +472,19 @@ def main() -> None:
             "address": address,
             "coingecko_id": coin_id,
             "active": True,
-            # мета для нас, на дэшборд можно потом вывести
             "listedon_first_seen": first_date.isoformat(),
             "listedon_exchanges": exchanges,
         }
 
         new_tokens.append(token_obj)
-        # чтобы не было повторных добавлений при нескольких кандидатах с тем же coin_id/адресом
         existing_by_cg[coin_id] = token_obj
         existing_by_chain_addr[addr_key] = token_obj
 
-        print(f"    -> ADDED: {sym} / {chain} / {address} / mcap={mcap:,.0f} USD")
+        print(
+            f"    -> ADDED: {sym} / {chain} / {address} / mcap={mcap:,.0f} USD "
+            f"exchanges={exchanges}"
+        )
 
-        # небольшая пауза, чтобы не душить CoinGecko
         time.sleep(1.0)
 
     print()
@@ -488,8 +495,9 @@ def main() -> None:
         return
 
     updated_tokens = existing_tokens + new_tokens
-    # можно отсортировать по symbol для красоты
-    updated_tokens_sorted = sorted(updated_tokens, key=lambda t: (t.get("symbol") or "", t.get("chain") or ""))
+    updated_tokens_sorted = sorted(
+        updated_tokens, key=lambda t: (t.get("symbol") or "", t.get("chain") or "")
+    )
 
     save_token_map(TOKEN_MAP_PATH, updated_tokens_sorted)
 
