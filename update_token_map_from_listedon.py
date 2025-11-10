@@ -12,30 +12,22 @@ from bs4 import BeautifulSoup
 # Конфиг
 # ----------------------------
 
-# Где лежит token_map.json (у тебя это raw GitHub, но в Railway скрипт
-# работает с локальным файлом, который потом пушишь/заливаешь)
 TOKEN_MAP_PATH = os.getenv("TOKEN_MAP_PATH", "token_map.json")
 
-# Источники на listedon
 LISTEDON_SOURCES = [
-    # (slug в URL listedon, человекочитаемое имя биржи)
     ("mxc", "MEXC"),
     ("gate", "Gate.io"),
 ]
 
-# Сколько страниц listedon по каждой бирже смотреть
 MAX_PAGES_PER_EXCHANGE = int(os.getenv("MAX_PAGES_PER_EXCHANGE", "10"))
 
-# Окно по возрасту листинга (в днях), считаем от сегодняшней даты (UTC)
-# Пример: MIN=7, MAX=90 → берём только токены с возрастом от 7 до 90 дней включительно.
+# Окно по возрасту: берем монеты с age_days в [MIN_AGE_DAYS, MAX_AGE_DAYS]
 MIN_AGE_DAYS = int(os.getenv("MIN_AGE_DAYS", "7"))
 MAX_AGE_DAYS = int(os.getenv("MAX_AGE_DAYS", "90"))
 
-# Фильтры по рынку
 MIN_MCAP_USD = float(os.getenv("MIN_MCAP_USD", "3000000"))       # 3M
 MAX_MCAP_USD = float(os.getenv("MAX_MCAP_USD", "1000000000"))    # 1B
 
-# Целевые биржи для условия "листинг на >= N биржах"
 TARGET_EXCHANGES = {
     "BINANCE",
     "MEXC",
@@ -61,8 +53,8 @@ SESSION.headers.update(
 class ListedonItem:
     symbol: str
     pair: str
-    exchange_slug: str       # "mxc", "gate"
-    exchange_name: str       # "MEXC", "Gate.io"
+    exchange_slug: str
+    exchange_name: str
     listed_date: date
     market_url: str
 
@@ -77,11 +69,8 @@ def log(msg: str) -> None:
 
 def extract_date_part(raw: str) -> Optional[str]:
     """
-    Из текста ячейки (может быть:
-      'October 23, 2025 15:14'
-      или
-      'October 23, 2025\\n15:14')
-    выдёргиваем только кусок вида 'October 23, 2025'.
+    Из текста ячейки (например 'October 23, 2025 15:14' или с переносами)
+    выдёргиваем только 'October 23, 2025'.
     """
     if not raw:
         return None
@@ -107,32 +96,37 @@ def parse_listedon_date(raw: str) -> Optional[date]:
 
 def fetch_listedon_for_exchange(slug: str, human_name: str) -> List[ListedonItem]:
     """
-    Парсим listedon для заданной биржи.
-    Берём страницы, пока:
+    Парсим listedon для биржи. Берём страницы, пока:
       - не исчерпали MAX_PAGES_PER_EXCHANGE
-      - не встретили записи старше MAX_AGE_DAYS (тогда дальше будет только старее, можно стопнуть).
+      - не встретили записи старше MAX_AGE_DAYS (тогда дальше будет только старее).
+    В эту функцию добавлено подробное логирование дат.
     """
     items: List[ListedonItem] = []
     today = datetime.now(timezone.utc).date()
 
+    log(f"[{human_name}] Today (UTC date) = {today}, "
+        f"MIN_AGE_DAYS={MIN_AGE_DAYS}, MAX_AGE_DAYS={MAX_AGE_DAYS}")
+
+    debug_rows_logged = 0  # чтобы не заспамить логи
+
     for page in range(1, MAX_PAGES_PER_EXCHANGE + 1):
         url = f"https://listedon.org/en/exchange/{slug}/search?page={page}&sort=date&order=1"
-        log(f"Fetching listedon page: {url}")
+        log(f"[{human_name}] Fetching listedon page: {url}")
         resp = SESSION.get(url, timeout=20)
         if resp.status_code != 200:
-            log(f"  ! HTTP {resp.status_code}, stop paging for {slug}")
+            log(f"[{human_name}]  ! HTTP {resp.status_code}, stop paging")
             break
 
         soup = BeautifulSoup(resp.text, "html.parser")
         table = soup.find("table")
         if not table:
-            log("  ! No table found, stop")
+            log(f"[{human_name}]  ! No table found, stop")
             break
 
         tbody = table.find("tbody")
         rows = tbody.find_all("tr") if tbody else table.find_all("tr")
         if not rows:
-            log("  ! No rows found, stop")
+            log(f"[{human_name}]  ! No rows found, stop")
             break
 
         stop_due_to_age = False
@@ -148,24 +142,33 @@ def fetch_listedon_for_exchange(slug: str, human_name: str) -> List[ListedonItem
                 continue
             base_symbol = pair_text.split("/")[0].strip().upper()
 
-            # ссылка на биржу (если есть)
             link_tag = tds[0].find("a")
             market_url = link_tag["href"] if link_tag and link_tag.has_attr("href") else ""
 
-            # последний столбец — дата (и время), нам нужна только дата
+            # последний столбец — дата (с временем), нам нужна только дата
             date_td = tds[-1]
-            date_text = date_td.get_text(" ", strip=True)
-            listed_date = parse_listedon_date(date_text)
+            date_text_raw = date_td.get_text(" ", strip=True)
+            listed_date = parse_listedon_date(date_text_raw)
             if not listed_date:
+                if debug_rows_logged < 10:
+                    log(f"[{human_name}]  !! Could not parse date from '{date_text_raw}'")
+                    debug_rows_logged += 1
                 continue
 
             age_days = (today - listed_date).days
 
-            # Слишком новый токен — пропускаем, но продолжаем смотреть дальше (там могут быть более старые)
+            if debug_rows_logged < 10:
+                log(
+                    f"[{human_name}]  row debug: pair='{pair_text}', "
+                    f"raw_date='{date_text_raw}', parsed_date={listed_date}, age_days={age_days}"
+                )
+                debug_rows_logged += 1
+
+            # слишком новый — младше нижней границы
             if age_days < MIN_AGE_DAYS:
                 continue
 
-            # Слишком старый токен — стопаем пагинацию по этой бирже (дальше будет только старее)
+            # слишком старый — старше верхней границы, дальше будет ещё старее
             if age_days > MAX_AGE_DAYS:
                 stop_due_to_age = True
                 break
@@ -182,10 +185,10 @@ def fetch_listedon_for_exchange(slug: str, human_name: str) -> List[ListedonItem
             )
 
         if stop_due_to_age:
-            log(f"  Reached items older than {MAX_AGE_DAYS} days on {slug}, stop paging.")
+            log(f"[{human_name}]  Reached items older than {MAX_AGE_DAYS} days, stop paging.")
             break
 
-    log(f"  Found {len(items)} items for {human_name} within date window.")
+    log(f"[{human_name}]  Found {len(items)} items within date window.")
     return items
 
 
@@ -218,7 +221,6 @@ def search_coins_by_symbol(symbol: str) -> List[Dict[str, Any]]:
     return out
 
 
-# маппинг платформ Coingecko → наши chain-строки
 PLATFORM_TO_CHAIN = {
     "ethereum": "ethereum",
     "binance-smart-chain": "bnb",
@@ -229,7 +231,6 @@ PLATFORM_TO_CHAIN = {
 
 
 def normalize_exchange_name(name: str) -> str:
-    # легкая нормализация, чтобы поймать "MEXC", "MEXC Global" и т.п.
     return name.strip().upper().replace(".COM", "").replace(" ", "")
 
 
@@ -255,9 +256,6 @@ def save_token_map(path: str, tokens: List[Dict[str, Any]]) -> None:
 # ----------------------------
 
 def build_existing_index(existing: List[Dict[str, Any]]) -> Set[Tuple[str, str]]:
-    """
-    Индекс уже существующих токенов по (chain, address), чтобы не писать дубликаты.
-    """
     idx: Set[Tuple[str, str]] = set()
     for t in existing:
         chain = str(t.get("chain", "")).lower()
@@ -268,14 +266,6 @@ def build_existing_index(existing: List[Dict[str, Any]]) -> Set[Tuple[str, str]]
 
 
 def group_listedon_items(items: List[ListedonItem]) -> Dict[str, Dict[str, Any]]:
-    """
-    Группируем по символу:
-      symbol -> {
-        "symbol": ...,
-        "exchanges": set(...),
-        "first_listed": date,
-      }
-    """
     grouped: Dict[str, Dict[str, Any]] = {}
     for it in items:
         sym = it.symbol.upper()
@@ -310,25 +300,6 @@ def token_entries_from_coin(
     listed_meta: Dict[str, Any],
     existing_idx: Set[Tuple[str, str]],
 ) -> List[Dict[str, Any]]:
-    """
-    Превращаем ответ /coins/{id} в записи token_map формата:
-      {
-        "symbol": ...,
-        "name": ...,
-        "chain": "ethereum" | "bnb" | "solana",
-        "address": "...",
-        "coingecko_id": "...",
-        "active": true,
-        "listedon_first_seen_at": "YYYY-MM-DD",
-        "listedon_exchanges": ["MEXC", "Gate.io", ...]
-      }
-
-    Условия:
-      - mcap в [MIN_MCAP_USD, MAX_MCAP_USD]
-      - chain ∈ {ethereum, bnb, solana}
-      - листинг хотя бы на MIN_EXCHANGES_REQUIRED целевых бирж
-      - не дублируем по (chain, address)
-    """
     entries: List[Dict[str, Any]] = []
 
     market_data = coin.get("market_data") or {}
@@ -339,7 +310,6 @@ def token_entries_from_coin(
     if not (MIN_MCAP_USD <= mcap <= MAX_MCAP_USD):
         return []
 
-    # Смотрим, на скольких целевых биржах торгуется токен (по Coingecko)
     tickers = coin.get("tickers") or []
     exchanges_seen: Set[str] = set()
     for t in tickers:
@@ -415,8 +385,6 @@ def main() -> None:
     grouped = group_listedon_items(listedon_items)
     log(f"Grouped into {len(grouped)} unique symbols.")
 
-    # пока фильтруем мягко: на listedon достаточно, что токен появился хотя бы на 1 бирже
-    # (жёсткий фильтр по количеству бирж делаем по Coingecko)
     candidates_symbols = [
         sym for sym, meta in grouped.items()
         if len(meta["exchanges"]) >= 1
