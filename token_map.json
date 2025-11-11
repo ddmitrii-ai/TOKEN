@@ -119,4 +119,324 @@
     "coingecko_id": "four",
     "active": true
   }
+  {
+    "symbol": "AVICI",
+    "name": "AVICI",
+    "chain": "solana",
+    "address": "BANKJmvhT8tiJRsBSS1n2HryMBPvT5Ze4HU95DUAmeta",
+    "coingecko_id": "avici",
+    "active": true
+  }
+  {
+    "symbol": "ALLO",
+    "name": "ALLO",
+    "chain": "bnb",
+    "address": "0x9c8b5ca345247396bdfac0395638ca9045c6586e",
+    "coingecko_id": "allo",
+    "active": true
+  }
+  {
+    "symbol": "ADIX",
+    "name": "ADIX",
+    "chain": "bnb",
+    "address": "0x020766ddfc022c26bd30ced6efd2ba8062dd7bac",
+    "coingecko_id": "adix",
+    "active": true
+  }
+  {
+    "symbol": "BNBHOLDER",
+    "name": "BNBHOLDER",
+    "chain": "bnb",
+    "address": "0x44440f83419de123d7d411187adb9962db017d03",
+    "coingecko_id": "bian-holder",
+    "active": true
+  }
+  {
+    "symbol": "JCT",
+    "name": "JCT",
+    "chain": "bnb",
+    "address": "0xea37a8de1de2d9d10772eeb569e28bfa5cb17707",
+    "coingecko_id": "janction",
+    "active": true
+  }
+  {
+    "symbol": "ARIAIP",
+    "name": "ARIAIP",
+    "chain": "bnb",
+    "address": "0x2a7e3392458307493c86388d5e544aad93286836",
+    "coingecko_id": "aria-2",
+    "active": true
+  }
+  {
+    "symbol": "ELIZAOS",
+    "name": "ELIZAOS",
+    "chain": "solana",
+    "address": "DuMbhu7mvQvqQHGcnikDgb4XegXJRyhUBfdU22uELiZA",
+    "coingecko_id": "elizaos",
+    "active": true
+  }
+  {
+    "symbol": "NUMI",
+    "name": "NUMI",
+    "chain": "bnb",
+    "address": "0xc61eb549acf4a05ed6e3fe0966f5e213b23541ce",
+    "coingecko_id": "numine-token",
+    "active": true
+  }
+  {
+    "symbol": "MON",
+    "name": "MON",
+    "chain": "ethereum",
+    "address": "0xc555d625828c4527d477e595ff1dd5801b4a600e",
+    "coingecko_id": "mon",
+    "active": true
+  }
+  {
+    "symbol": "FOLKS",
+    "name": "FOLKS",
+    "chain": "bnb",
+    "address": "0xff7f8f301f7a706e3cfd3d2275f5dc0b9ee8009b",
+    "coingecko_id": "folks",
+    "active": true
+  }
+  {
+    "symbol": "UAI",
+    "name": "UAI",
+    "chain": "bnb",
+    "address": "0x3e5d4f8aee0d9b3082d5f6da5d6e225d17ba9ea0",
+    "coingecko_id": "unifai-network",
+    "active": true
+  }
+  {
+    "symbol": "PLAI",
+    "name": "PLAI",
+    "chain": "base",
+    "address": "0x9215e6362f76fc781df00d51293cc7179c6c99a4",
+    "coingecko_id": "play-ai",
+    "active": true
+  }
+  {
+    "symbol": "BEAT",
+    "name": "BEAT",
+    "chain": "bnb",
+    "address": "0xcf3232b85b43bca90e51d38cc06cc8bb8c8a3e36",
+    "coingecko_id": "audiera",
+    "active": true
+  }
+  {
+    "symbol": "LITKEY",
+    "name": "LITKEY",
+    "chain": "bnb",
+    "address": "0x0bbea6812fb3fcbca126edb558e551b3f1702026",
+    "coingecko_id": "lit-protocol",
+    "active": true
+  }
+  {
+    "symbol": "BOS",
+    "name": "BOS",
+    "chain": "bnb",
+    "address": "0xae1e85c3665b70b682defd778e3dafdf09ed3b0f",
+    "coingecko_id": "bitcoinos",
+    "active": true
+  }
+  {
+    "symbol": "EAT",
+    "name": "EAT",
+    "chain": "solana",
+    "address": "375aiUqZERLrB9sHtsArKr4nuWCgBrtqibUDBMGeLvZC",
+    "coingecko_id": "375ai",
+    "active": true
+  }
+  {
+    "symbol": "PIGGY",
+    "name": "PIGGY",
+    "chain": "bnb",
+    "address": "0x8410fea2dd13c1798977ff4d55a9e1835f54f216",
+    "coingecko_id": "piggycell",
+    "active": true
+  }
+  {
+    "symbol": "XNL",
+    "name": "XNL",
+    "chain": "bnb",
+    "address": "0xdfeb13936a8975f9f788e73fb93861ce461541f9",
+    "coingecko_id": "novastro",
+    "active": true
+  }
+  {
+    "symbol": "42",
+    "name": "42",
+    "chain": "bnb",
+    "address": "0x834baf4f7832cc3c00734ddb2e0c61c68d975822",
+    "coingecko_id": "semantic-layer",
+    "active": true
+  }
+  {
+    "symbol": "COMMON",
+    "name": "COMMON",
+    "chain": "base",
+    "address": "0x4c87da04887a1f9f21f777e3a8dd55c3c9f84701",
+    "coingecko_id": "common-2",
+    "active": true
+  }
+  {
+    "symbol": "XNAP",
+    "name": "XNAP",
+    "chain": "bnb",
+    "address": "0xd4058218632112de109846a2952be102d0330ab3",
+    "coingecko_id": "snapx",
+    "active": true
+  }
+  {
+    "symbol": "STARHEROES",
+    "name": "STARHEROES",
+    "chain": "arbitrum",
+    "address": "0xb299751b088336e165da313c33e3195b8c6663a6",
+    "coingecko_id": "starheroes",
+    "active": true
+  }
+  {
+    "symbol": "PING",
+    "name": "PING",
+    "chain": "base",
+    "address": "0xd85c31854c2b0fb40aaa9e2fc4da23c21f829d46",
+    "coingecko_id": "ping",
+    "active": true
+  }
+  {
+    "symbol": "AT",
+    "name": "AT",
+    "chain": "bnb",
+    "address": "0x9be61a38725b265bc3eb7bfdf17afdfc9d26c130",
+    "coingecko_id": "apro",
+    "active": true
+  }
+  {
+    "symbol": "PAYAI",
+    "name": "PAYAI",
+    "chain": "solana",
+    "address": "E7NgL19JbN8BhUDgWjkH8MtnbhJoaGaWJqosxZZepump",
+    "coingecko_id": "payai-network",
+    "active": true
+  }
+  {
+    "symbol": "ON",
+    "name": "ON",
+    "chain": "bnb",
+    "address": "0x0e4f6209ed984b21edea43ace6e09559ed051d48",
+    "coingecko_id": "orochi-network",
+    "active": true
+  }
+  {
+    "symbol": "LMTS",
+    "name": "LMTS",
+    "chain": "base",
+    "address": "0x9eadbe35f3ee3bf3e28180070c429298a1b02f93",
+    "coingecko_id": "limitless-3",
+    "active": true
+  }
+  {
+    "symbol": "APR",
+    "name": "APR",
+    "chain": "bnb",
+    "address": "0x299ad4299da5b2b93fba4c96967b040c7f611099",
+    "coingecko_id": "apriori",
+    "active": true
+  }
+  {
+    "symbol": "MET",
+    "name": "MET",
+    "chain": "solana",
+    "address": "METvsvVRapdj9cFLzq4Tr43xK4tAjQfwX76z3n6mWQL",
+    "coingecko_id": "meteora",
+    "active": true
+  }
+  {
+    "symbol": "CGN",
+    "name": "CGN",
+    "chain": "base",
+    "address": "0x2e6c4bd1c947e195645d2b920b827498cfaa6766",
+    "coingecko_id": "cygnus",
+    "active": true
+  }
+  {
+    "symbol": "TURTLE",
+    "name": "TURTLE",
+    "chain": "bnb",
+    "address": "0x66fd8de541c0594b4dccdfc13bf3a390e50d3afd",
+    "coingecko_id": "turtle",
+    "active": true
+  }
+  {
+    "symbol": "BELIEVE",
+    "name": "BELIEVE",
+    "chain": "solana",
+    "address": "BLVxek8YMXUQhcKmMvrFTrzh5FXg8ec88Crp6otEaCMf",
+    "coingecko_id": "launch-coin-on-believe",
+    "active": true
+  }
+  {
+    "symbol": "BLUAI",
+    "name": "BLUAI",
+    "chain": "bnb",
+    "address": "0xed9ae3def8d6f052971bb8b6d1975ff267cf9aad",
+    "coingecko_id": "bluwhale",
+    "active": true
+  }
+  {
+    "symbol": "ANOME",
+    "name": "ANOME",
+    "chain": "bnb",
+    "address": "0x6bc3855827fa6ee1229c937a26bb9fca1a0ffbf0",
+    "coingecko_id": "anome",
+    "active": true
+  }
+  {
+    "symbol": "RVV",
+    "name": "RVV",
+    "chain": "bnb",
+    "address": "0x80563fc2dd549bf36f82d3bf3b970bb5b08dbddb",
+    "coingecko_id": "astra-nova",
+    "active": true
+  }
+  {
+    "symbol": "ZBT",
+    "name": "ZBT",
+    "chain": "bnb",
+    "address": "0xfab99fcf605fd8f4593edb70a43ba56542777777",
+    "coingecko_id": "zerobase",
+    "active": true
+  }
+  {
+    "symbol": "WBAI",
+    "name": "WBAI",
+    "chain": "bnb",
+    "address": "0x635d44f246156ed1080cb470877256c847673f19",
+    "coingecko_id": "whitebridge",
+    "active": true
+  }
+  {
+    "symbol": "RECALL",
+    "name": "RECALL",
+    "chain": "base",
+    "address": "0x1f16e03c1a5908818f47f6ee7bb16690b40d0671",
+    "coingecko_id": "recall",
+    "active": true
+  }
+  {
+    "symbol": "ENSO",
+    "name": "ENSO",
+    "chain": "ethereum",
+    "address": "0x699f088b5dddcafb7c4824db5b10b57b37cb0c66",
+    "coingecko_id": "enso",
+    "active": true
+  }
+  {
+    "symbol": "YB",
+    "name": "YB",
+    "chain": "ethereum",
+    "address": "0x01791f726b4103694969820be083196cc7c045ff",
+    "coingecko_id": "yield-basis",
+    "active": true
+  }
 ]
