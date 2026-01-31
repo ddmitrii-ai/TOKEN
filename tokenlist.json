@@ -1,0 +1,58 @@
+[
+  {
+    "exchange": "mexc",
+    "symbol": "SCT",
+    "chain": "bnb",
+    "token_address": "0x405e7454E71AEfe8897438ADc08E3f3e6d49Dfc1",
+    "coingecko_id": "supercells",
+    "token_name": "SuperCells"
+  },
+ {
+    "exchange": "mexc",
+    "symbol": "RIVER",
+    "chain": "ethereum",
+    "token_address": "0xdA7AD9dea9397cffdDAE2F8a052B82f1484252B3",
+    "coingecko_id": "river",
+    "token_name": "River"
+  },
+  {
+    "exchange": "mexc",
+    "symbol": "BULLA",
+    "chain": "bnb",
+    "token_address": "0x595E21b20E78674F8a64C1566A20b2b316Bc3511",
+    "coingecko_id": "bulla-3",
+    "token_name": "BULLA"
+  },
+ {
+    "exchange": "mexc",
+    "symbol": "LDO",
+    "chain": "ethereum",
+    "token_address": "0x5a98fcbea516cf06857215779fd812ca3bef1b32",
+    "coingecko_id": "lido-dao",
+    "token_name": "Lido DAO"
+  },
+  {
+    "exchange": "mexc",
+    "symbol": "ZEREBRO",
+    "chain": "solana",
+    "token_address": "8x5VqbHA8D7NkD52uNuS5nnt3PwA8pLD34ymskeSo2Wn",
+    "coingecko_id": "zerebro",
+    "token_name": "Zerebro"
+  },
+ {
+    "exchange": "mexc",
+    "symbol": "PIPPIN",
+    "chain": "solana",
+    "token_address": "Dfh5DzRgSvvCFDoYc2ciTkMrbDfRKybA4SoFbPmApump",
+    "coingecko_id": "pippin",
+    "token_name": "pippin"
+  },
+ {
+    "exchange": "mexc",
+    "symbol": "SATS2",
+    "chain": "bnb",
+    "token_address": "0x902a9D016b79f04ea14c7E99381aE81781292d48",
+    "coingecko_id": null,
+    "token_name": null
+  },
+]
